@@ -12,6 +12,10 @@ Hosted notebook demo: https://ndp-prod-194.chpc.utah.edu/jupyter/hub/spawn
 
 Sign in through CILogon, start the **Air Quality Demo** workspace, and choose the **NDP-EP/SciDx Air Quality Streaming** image. The session opens `notebooks/aq.ipynb`.
 
+Notebook demo access requirements:
+- Request access to the **Adaptive Air Quality Sensing Endpoint**: https://nationaldataplatform.org/endpoints/view/6980dfcf538c0550584c492d.
+- Request access to **NDP-Earthscope-Endpoint**: https://nationaldataplatform.org/endpoints/view/69e915bac1996db0fc21d3ab to run the workspace.
+
 Public air-quality UI: https://dev.air-quality.ndp.utah.edu/
 
 Public NDP endpoint and stream UI: https://dev.air-quality.ndp.utah.edu/ep/ui/
