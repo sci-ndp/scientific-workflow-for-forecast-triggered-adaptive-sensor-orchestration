@@ -46,7 +46,7 @@ Clone the repository, move into this folder, then start the services:
 
 ```bash
 git clone <repo-url>
-cd stream-simulation-ebus
+cd scientific-workflow-for-forecast-triggered-adaptive-sensor-orchestration
 docker compose up --build -d
 ```
 
