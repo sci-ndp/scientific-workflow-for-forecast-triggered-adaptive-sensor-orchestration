@@ -66,7 +66,7 @@ The public endpoints are provided so others can try the system, explore the UI, 
 ### Option 2: Local Python environment
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 pip uninstall -y scidx_streaming
@@ -146,7 +146,7 @@ The main cohort sizes used in the evaluation are:
 Create a local environment and install dependencies:
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 pip uninstall -y scidx_streaming
@@ -172,14 +172,14 @@ The pushdown and figure-regeneration steps operate on archived local files and d
 If you only want to reproduce the paper figures from the archived CSV outputs already in the repository, run:
 
 ```bash
-python scripts/build_scaling_paper_figures.py
+python3 scripts/build_scaling_paper_figures.py
 
-python scripts/run_adapters.py \
+python3 scripts/run_adapters.py \
   --linear-runs-csv paper/results/exp_runs.csv \
   --kdtree-runs-csv paper/results/exp_runs_kdtree.csv \
   --selection-out-csv paper/results/exp_selection.csv
 
-python scripts/plot_selection_comparison.py \
+python3 scripts/plot_selection_comparison.py \
   --csv paper/results/exp_selection.csv \
   --figures-dir paper/figures
 ```
@@ -196,7 +196,7 @@ This regenerates:
 The pushdown summary figure is derived from the pushdown CSV outputs:
 
 ```bash
-python scripts/run_pushdown.py
+python3 scripts/run_pushdown.py
 ```
 
 This refreshes:
@@ -209,24 +209,24 @@ This refreshes:
 To rerun the main evaluation from the archived prediction CSVs, execute:
 
 ```bash
-python scripts/run_scaling.py \
+python3 scripts/run_scaling.py \
   --selector linear \
   --out-csv paper/results/exp_runs.csv
 
-python scripts/run_scaling.py \
+python3 scripts/run_scaling.py \
   --selector kdtree \
   --out-csv paper/results/exp_runs_kdtree.csv
 
-python scripts/run_pushdown.py
+python3 scripts/run_pushdown.py
 
-python scripts/run_adapters.py \
+python3 scripts/run_adapters.py \
   --linear-runs-csv paper/results/exp_runs.csv \
   --kdtree-runs-csv paper/results/exp_runs_kdtree.csv \
   --selection-out-csv paper/results/exp_selection.csv
 
-python scripts/build_scaling_paper_figures.py
+python3 scripts/build_scaling_paper_figures.py
 
-python scripts/plot_selection_comparison.py \
+python3 scripts/plot_selection_comparison.py \
   --csv paper/results/exp_selection.csv \
   --figures-dir paper/figures
 ```

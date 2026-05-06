@@ -386,7 +386,17 @@ def _load_detection_fn():
     try:
         from src.event_detection import detect_hotspots_for_day
     except Exception:
-        from event_detection import detect_hotspots_for_day
+        # Running as "python scripts/run_scaling.py" may omit repo root from
+        # sys.path; add it once, then retry src import.
+        import sys
+
+        root = str(Path(__file__).resolve().parents[1])
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        try:
+            from src.event_detection import detect_hotspots_for_day
+        except Exception:
+            from event_detection import detect_hotspots_for_day
     return detect_hotspots_for_day
 
 
