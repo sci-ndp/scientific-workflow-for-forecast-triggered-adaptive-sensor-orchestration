@@ -1,0 +1,92 @@
+region:
+  name: utah
+  lat_min: 37.0
+  lat_max: 42.1
+  lon_min: 245.9 
+  lon_max: 251.0
+
+dates:
+  start: "2025-01-16"
+  end:   "2025-01-16"
+
+aurora:
+  times:
+    - "00:00"
+    - "12:00"
+  lead_hours: 12
+  region_tag: "global"
+
+paths:
+  cams_download: "data/raw/cams_raw"
+  static_pickle: "aurora-0.4-air-pollution-static.pickle"
+
+synoptic:
+  vars: ["PM_25_concentration", "ozone_concentration", "CO_concentration", "NO2_concentration"]
+  poll_interval_s: 300
+  owner_org: "sensors"
+
+hotspot:
+  url: https://drive.google.com/uc?export=download&id=1Vcuo46Ita4wFAFrgJGP51iT8U7M9h1P1
+  owner_org: "hotspot"
+
+stations:
+  - station_id: "QCV"
+    name: "Copperview"
+    lat: 40.59806
+    lon: -111.89417
+    elevation_m: 1343.9   # 4409.0 ft
+
+  - station_id: "QNR"
+    name: "Near Road"
+    lat: 40.66284
+    lon: -111.90180
+    elevation_m: 1305.2   # 4282.0 ft
+
+  - station_id: "QHW"
+    name: "Hawthorne"
+    lat: 40.73350
+    lon: -111.87170
+    elevation_m: 1310.9   # 4301.0 ft
+
+  - station_id: "QUTTC"
+    name: "Utah Technical Center"
+    lat: 40.77710
+    lon: -111.94500
+    elevation_m: 1289.9   # 4232.0 ft
+
+  - station_id: "QRP"
+    name: "Rose Park"
+    lat: 40.79550
+    lon: -111.93090
+    elevation_m: 1289.9   # 4232.0 ft
+
+
+  - station_id: "AMB2115"
+    name: "AIRQ_2828"
+    lat: 40.58745
+    lon: -111.86031
+    elevation_m: null
+
+  - station_id: "QLN"
+    name: "Lindon"
+    lat: 40.3388
+    lon: -111.7133
+    elevation_m: 1444.1424
+
+  - station_id: "QHV"
+    name: "Harrisville"
+    lat: 41.3028
+    lon: -111.9883
+    elevation_m: 1317.9552
+
+  # - station_id: "WBB"
+  #   name: "WBB"
+  #   lat: 40.76623
+  #   lon: -111.84755
+  #   elevation_m: 1480.0   # from previous config
+
+hotspots:
+  pm25_threshold: 10.0   # µg/m³
+  persistence_k: 12
+  timestep_hours: 1
+  round_decimals: 2

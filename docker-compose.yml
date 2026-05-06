@@ -1,0 +1,48 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  forecast-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: stream-simulation-ebus:latest
+    working_dir: /app
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+      - CDSAPI_URL=${CDSAPI_URL:-https://ads.atmosphere.copernicus.eu/api}
+      - CDSAPI_KEY=${CDSAPI_KEY:-}
+      - REDIS_URL=redis://redis:6379/0
+      - AQ_MAX_DAYS=${AQ_MAX_DAYS:-1}
+      - AQ_MAX_QUEUE_LENGTH=${AQ_MAX_QUEUE_LENGTH:-2}
+      - AQ_MAX_ENQUEUES_PER_HOUR=${AQ_MAX_ENQUEUES_PER_HOUR:-2}
+    volumes:
+      - ./data:/app/data
+      - ${HOME}/.cdsapirc:/root/.cdsapirc:ro
+    depends_on:
+      - redis
+    command: uvicorn src.forecast_api:app --host 0.0.0.0 --port 8000
+
+  aurora-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: stream-simulation-ebus:latest
+    working_dir: /app
+    environment:
+      - PYTHONPATH=/app
+      - CDSAPI_URL=${CDSAPI_URL:-https://ads.atmosphere.copernicus.eu/api}
+      - CDSAPI_KEY=${CDSAPI_KEY:-}
+      - REDIS_URL=redis://redis:6379/0
+      - AQ_MAX_DAYS=${AQ_MAX_DAYS:-1}
+      - AQ_MAX_QUEUE_LENGTH=${AQ_MAX_QUEUE_LENGTH:-2}
+      - AQ_MAX_ENQUEUES_PER_HOUR=${AQ_MAX_ENQUEUES_PER_HOUR:-2}
+    volumes:
+      - ./data:/app/data
+      - ${HOME}/.cdsapirc:/root/.cdsapirc:ro
+    depends_on:
+      - redis
+    command: rq worker aurora --url redis://redis:6379/0

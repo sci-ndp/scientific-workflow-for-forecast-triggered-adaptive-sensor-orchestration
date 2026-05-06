@@ -1,0 +1,1 @@
+recursive-include scidx_streaming/agentic_mcp *.yaml

@@ -1,0 +1,17 @@
+{
+  "rebuild_mode": "full",
+  "git_sha": "297c9f6",
+  "python": ".venv/bin/python",
+  "outputs": [
+    "paper/results/exp_runs.csv",
+    "paper/results/exp_runs_kdtree.csv",
+    "paper/results/exp_pushdown.csv",
+    "paper/results/pushdown_speedup_table.csv",
+    "paper/results/scaling_ci_summary.csv",
+    "paper/figures/scaling_latency_vs_sensor_count_ci.svg",
+    "paper/figures/scaling_total_latency_ecdf.svg",
+    "paper/figures/k_sensitivity_total_p50.svg",
+    "paper/figures/linear_vs_kdtree_selection_clean.svg",
+    "paper/figures/pushdown_summary.svg"
+  ]
+}

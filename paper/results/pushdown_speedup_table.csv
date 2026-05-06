@@ -1,0 +1,3 @@
+mode,runs,detect_p50_s,detect_p95_s,scanned_cells_p50,scanned_cells_p95,scanned_bytes_p50,scanned_bytes_p95,speedup_detect_p50_vs_usa,speedup_detect_p95_vs_usa,cells_reduction_pct_vs_usa,bytes_reduction_pct_vs_usa
+usa,14,7.59375,8.0937728,9261,9261,33839810,33875450.7,1,1,0,0
+utah,14,0.11638,0.1289029,144,144,527453,528511,65.2496133356247,62.7896874313922,98.4450923226433,98.4413239908853
