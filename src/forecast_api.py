@@ -55,7 +55,11 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 MAX_DAYS_PER_REQUEST = max(1, int(os.getenv("AQ_MAX_DAYS", "1")))
 MAX_QUEUE_LENGTH = max(1, int(os.getenv("AQ_MAX_QUEUE_LENGTH", "2")))
 MAX_ENQUEUES_PER_HOUR = max(1, int(os.getenv("AQ_MAX_ENQUEUES_PER_HOUR", "2")))
-RQ_JOB_TIMEOUT_SECONDS = 1800
+# Long-running forecast downloads can exceed 30 minutes, but we cap them at 1 hour.
+RQ_JOB_TIMEOUT_SECONDS = min(
+    3600,
+    max(1800, int(os.getenv("AQ_RQ_JOB_TIMEOUT_SECONDS", "3600"))),
+)
 RQ_JOB_TTL_SECONDS = 3600
 REQUEST_KEY_TTL_SECONDS = 2 * 3600
 ENQUEUE_WINDOW_SECONDS = 3600
@@ -1595,6 +1599,17 @@ def _job_is_active(status: str) -> bool:
     return status in {"queued", "started", "deferred", "scheduled"}
 
 
+def _map_rq_status(status: str) -> str:
+    return {
+        "queued": "queued",
+        "started": "running",
+        "finished": "done",
+        "failed": "failed",
+        "deferred": "queued",
+        "scheduled": "queued",
+    }.get(status, status)
+
+
 def _clear_request_mapping(request_key: Optional[str], job_id: Optional[str] = None) -> None:
     if not request_key:
         return
@@ -1608,7 +1623,7 @@ def _clear_request_mapping(request_key: Optional[str], job_id: Optional[str] = N
         logger.warning("Failed to clear request mapping for %s", request_key, exc_info=True)
 
 
-def _find_active_job_for_request_key(request_key: str) -> Optional[str]:
+def _find_active_job_for_request_key(request_key: str) -> Optional[tuple[str, str]]:
     try:
         current = REDIS.get(request_key)
     except RedisError as ex:
@@ -1628,7 +1643,7 @@ def _find_active_job_for_request_key(request_key: str) -> Optional[str]:
         raise HTTPException(status_code=503, detail=f"Queue backend unavailable: {ex}") from ex
 
     if _job_is_active(status):
-        return job_id
+        return job_id, _map_rq_status(status)
 
     _clear_request_mapping(request_key, job_id)
     return None
@@ -1647,14 +1662,7 @@ def _set_job_meta(job: Optional[Job], **updates: Any) -> None:
 def _status_payload_from_rq_job(job: Job) -> Dict[str, Any]:
     meta = dict(job.meta or {})
     status = job.get_status(refresh=True)
-    mapped_status = {
-        "queued": "queued",
-        "started": "running",
-        "finished": "done",
-        "failed": "failed",
-        "deferred": "queued",
-        "scheduled": "queued",
-    }.get(status, status)
+    mapped_status = _map_rq_status(status)
 
     payload = {
         "status": mapped_status,
@@ -2444,11 +2452,12 @@ def run(req: RunRequest = Body(..., examples={
 
     try:
         with REDIS.lock(ENQUEUE_GUARD_LOCK, timeout=30, blocking_timeout=5):
-            existing_job_id = _find_active_job_for_request_key(request_key)
-            if existing_job_id:
+            existing_job = _find_active_job_for_request_key(request_key)
+            if existing_job:
+                existing_job_id, existing_status = existing_job
                 return {
                     "job_id": existing_job_id,
-                    "status": "queued",
+                    "status": existing_status,
                     "time_tag": time_tag,
                     "lead_hours": lead_hours,
                 }
