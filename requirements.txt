@@ -30,3 +30,6 @@ uvicorn[standard]
 pydantic
 redis>=5.0
 rq>=1.16
+pyarrow
+jsonschema
+datasketches

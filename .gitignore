@@ -212,6 +212,8 @@ setup_info.txt
 user_info.env
 
 
+data/processed/hotspots/
+data/processed/map/
 figs/
 data/raw/
 logs/
@@ -223,12 +225,3 @@ src/plan_figure.md
 *.fdb_latexmk
 *.log
 *.gz
-
-
-.env
-*.pem
-*.key
-__pycache__/
-*.pyc
-.ipynb_checkpoints/
-.DS_Store

@@ -34,6 +34,8 @@ class AirQualityWorkflowService:
         hotspots_dir: Path,
         map_dir: Path,
         build_public_prediction_url: Callable[[str], str],
+        build_public_hotspot_url: Callable[[str], str],
+        build_public_map_url: Callable[[str], str],
         register_prediction_files_ndp: Callable[..., Dict[str, Any]],
         register_hotspot_files_ndp: Callable[..., Dict[str, Any]],
         create_clients: Callable[[Optional[str]], tuple[str, Any, Any]],
@@ -44,6 +46,8 @@ class AirQualityWorkflowService:
         self.hotspots_dir = Path(hotspots_dir)
         self.map_dir = Path(map_dir)
         self.build_public_prediction_url = build_public_prediction_url
+        self.build_public_hotspot_url = build_public_hotspot_url
+        self.build_public_map_url = build_public_map_url
         self.register_prediction_files_ndp = register_prediction_files_ndp
         self.register_hotspot_files_ndp = register_hotspot_files_ndp
         self.create_clients = create_clients
@@ -317,23 +321,17 @@ class AirQualityWorkflowService:
         hotspots_df.to_csv(hotspot_out, index=False)
 
         primary_field = threshold_runs[0]["field"]
-        primary_threshold = float(threshold_runs[0]["threshold"])
-        ndp_field = primary_field if len(threshold_runs) == 1 else "multi_field"
-        ndp_result = self.register_hotspot_files_ndp(
-            [hotspot_out],
-            threshold_field=ndp_field,
-            threshold=primary_threshold,
-            persistence_k=int(detection_request.get("persistence_k", 12)),
-        )
+        preview_df = hotspots_df.head(10).astype(object)
+        preview_df = preview_df.where(pd.notna(preview_df), None)
 
         return {
             "prediction_file": str(pred_path),
             "threshold_field": primary_field,
             "applied_thresholds": threshold_runs,
             "hotspots_csv": str(hotspot_out),
+            "hotspots_url": self.build_public_hotspot_url(hotspot_out.name),
             "hotspot_count": int(len(hotspots_df)),
-            "ndp": ndp_result,
-            "preview": hotspots_df.head(10).to_dict(orient="records"),
+            "preview": preview_df.to_dict(orient="records"),
         }
 
     def select_sensors(
@@ -377,11 +375,14 @@ class AirQualityWorkflowService:
         map_df = self._mapping_rows_to_dataframe(select_result.get("mapping_rows", []))
         map_out = self.map_dir / f"{hotspot_path.stem}_sensor_map.csv"
         map_df.to_csv(map_out, index=False)
+        preview_df = map_df.head(10).astype(object)
+        preview_df = preview_df.where(pd.notna(preview_df), None)
 
         return {
             "hotspots_file": str(hotspot_path),
             "sensors_found": int(len(candidates)),
             "map_csv": str(map_out),
+            "map_url": self.build_public_map_url(map_out.name),
             "mapping_count": int(len(map_df)),
-            "preview": map_df.to_dict(orient="records"),
+            "preview": preview_df.to_dict(orient="records"),
         }

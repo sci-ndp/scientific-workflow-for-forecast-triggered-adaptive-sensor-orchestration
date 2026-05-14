@@ -35,6 +35,10 @@ from scidx_streaming import StreamingClient
 import logging
 
 from src.air_quality_workflow_service import AirQualityWorkflowService
+from src.agent_tools import ToolDispatchError, invoke_tool
+from src.exact_engine import ExactEngine
+from src.phase2_station_log import normalize_live_capture_payloads
+from src.saved_results import SavedResultsStore
 
 app = FastAPI(title="Forecast Service", version="1.0")
 
@@ -139,7 +143,7 @@ _DASHBOARD_HTML = """\
                text-decoration:none;display:inline-flex;align-items:center;justify-content:center;white-space:nowrap}
   .header-docs:hover{background:var(--ndp-primary-soft-strong);border-color:var(--accent);color:var(--accent-dark);text-decoration:none}
   .container{max-width:1520px;margin:20px auto;padding:0 18px}
-  .stepper{display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:16px;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card)}
+  .stepper{display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;justify-content:center;margin-bottom:16px;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card)}
   .step-pill{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--ndp-line-strong);border-radius:8px;
              font-size:.75rem;font-weight:500;background:var(--ndp-surface-alt);color:var(--muted);cursor:pointer;transition:background .16s,border-color .16s,color .16s;
              white-space:nowrap;flex:0 0 auto}
@@ -192,14 +196,6 @@ _DASHBOARD_HTML = """\
   .nav-btns{display:flex;justify-content:space-between;align-items:center;margin-top:18px}
   .hidden{display:none!important}
   .preview-table-wrap{max-height:300px;overflow:auto;margin-top:10px}
-  .fig-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px}
-  .fig-grid img{width:100%;border-radius:8px;border:1px solid var(--border);cursor:pointer;transition:border-color .16s}
-  .fig-grid img:hover{border-color:var(--accent)}
-  .fig-caption{font-size:.75rem;color:var(--muted);text-align:center;margin-top:4px}
-  .lb-overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;
-              z-index:9999;cursor:zoom-out;display:none}
-  .lb-overlay.open{display:flex}
-  .lb-overlay img{max-width:92vw;max-height:90vh;border-radius:10px;box-shadow:0 4px 30px rgba(0,0,0,.4)}
   @media(max-width:1200px){
     .stepper{flex-wrap:wrap;overflow-x:visible;padding:12px;gap:8px}
     .step-pill{font-size:.77rem;padding:6px 10px}
@@ -210,7 +206,6 @@ _DASHBOARD_HTML = """\
   }
   @media(max-width:640px){
     .form-grid{grid-template-columns:1fr}
-    .fig-grid{grid-template-columns:1fr}
     .brand-logo{width:170px}
     .stepper{padding:10px;gap:6px}
     .step-pill{padding:6px 8px;font-size:.74rem}
@@ -247,7 +242,6 @@ _DASHBOARD_HTML = """\
   <div class="step-pill" data-step="6"><span class="step-num">7</span> Sensors</div>
   <div class="step-pill" data-step="7"><span class="step-num">8</span> Create Stream</div>
   <div class="step-pill" data-step="8"><span class="step-num">9</span> Consume Stream</div>
-  <div class="step-pill" data-step="9"><span class="step-num">10</span> Results</div>
 </div>
 
 <!-- STEP 0 — Run Model -->
@@ -457,52 +451,11 @@ _DASHBOARD_HTML = """\
   <div class="log hidden" id="consume-log"></div>
   <div class="nav-btns">
     <button class="btn btn-outline btn-sm" onclick="goStep(7)">&larr; Back</button>
-    <button class="btn btn-outline btn-sm" onclick="goStep(9)">Next &rarr;</button>
-  </div>
-</div>
-
-<!-- STEP 9 — Results (Baseline Evaluation Figures) -->
-<div class="card" id="step-9">
-  <h2>10 &middot; Results</h2>
-  <div id="summary-content" style="font-size:.88rem;color:var(--muted);margin-bottom:14px">
-    14-Day Utah Baseline Evaluation &mdash; figures across multiple persistence settings. Click any image to enlarge.
-  </div>
-  <div class="fig-grid">
-    <div>
-      <img src="/static-figs/summary_metrics_by_k.svg" alt="Summary by k" onclick="openLB(this)"
-        onerror="this.onerror=null;this.src='/static-figs/figS1_summary_small_multiples_bars.png';"/>
-      <div class="fig-caption">Fig 1 &mdash; Summary Metrics by Persistence (k)</div>
-      <p style="font-size:.78rem;color:var(--muted);margin-top:6px;line-height:1.45">Mean hotspot count and relative sensor workload (% of always-on 5 sensors) averaged across 14 days, grouped by persistence setting k. Higher k produces fewer hotspots and lower workload.</p>
-    </div>
-    <div>
-      <img src="/static-figs/fig_latency_option3_stage_small_multiples.svg" alt="Latency" onclick="openLB(this)"
-        onerror="this.onerror=null;this.src='/static-figs/fig_latency_option3_stage_small_multiples.png';"/>
-      <div class="fig-caption">Fig 2 &mdash; Stage-wise Latency</div>
-      <p style="font-size:.78rem;color:var(--muted);margin-top:6px;line-height:1.45">Box-and-jitter plots showing the distribution of detect latency, sensor-selection latency, and total workflow latency (seconds) for each persistence k across all 14 evaluation days.</p>
-    </div>
-    <div>
-      <img src="/static-figs/per_day_workload_reduction.svg" alt="Workload reduction" onclick="openLB(this)"
-        onerror="this.onerror=null;this.src='/static-figs/fig_workload_reduction_by_day_colored_lines.png';"/>
-      <div class="fig-caption">Fig 3 &mdash; Per-day Workload Reduction</div>
-      <p style="font-size:.78rem;color:var(--muted);margin-top:6px;line-height:1.45">Per-day workload reduction (%) vs. always-on 5 sensors across persistence settings. Each colored line represents one of the 14 forecast days; steeper curves indicate greater efficiency gains at higher k.</p>
-    </div>
-    <div>
-      <img src="/static-figs/fig_hotspot_count_heatmap_blue.svg" alt="Hotspot heatmap" onclick="openLB(this)"
-        onerror="this.onerror=null;this.src='/static-figs/fig_hotspot_count_heatmap_blue.png';"/>
-      <div class="fig-caption">Fig 4 &mdash; Hotspot Count Heatmap</div>
-      <p style="font-size:.78rem;color:var(--muted);margin-top:6px;line-height:1.45">Heatmap of hotspot counts across all 14 days (rows) and persistence settings k (columns). Darker cells indicate more detected hotspots; days with elevated PM2.5 events (e.g., Jan 17, Jan 31) stand out clearly.</p>
-    </div>
-  </div>
-  <div class="nav-btns" style="margin-top:22px">
-    <button class="btn btn-outline btn-sm" onclick="goStep(8)">&larr; Back</button>
     <span></span>
   </div>
 </div>
 
 </div><!-- /container -->
-
-<!-- lightbox -->
-<div class="lb-overlay" id="lb" onclick="closeLB()"><img id="lb-img" src="" alt=""/></div>
 
 <footer style="text-align:center;padding:18px;font-size:.74rem;color:var(--muted)">
   Forecast Service v1.0 &middot; <a href="/docs" target="_blank">OpenAPI Docs</a> &middot; <a href="/health">Health</a>
@@ -518,10 +471,6 @@ let _predFilesOpen = false, _hotspotFilesOpen = false, _hotspotInputPreviewOpen 
 const _defaultPredListHtml = '<li style="color:var(--muted)">Click load to show&hellip;</li>';
 const _defaultHotListHtml = '<li style="color:var(--muted)">Click load to show&hellip;</li>';
 const _csvPreviewState = {};
-
-/* ── lightbox ────────────────────────────────── */
-function openLB(img){$('lb-img').src=img.src;$('lb').classList.add('open')}
-function closeLB(){$('lb').classList.remove('open')}
 
 /* ── stepper ─────────────────────────────────── */
 function goStep(n){
@@ -552,9 +501,19 @@ async function api(method,path,body){
   const opts={method,headers:{'Content-Type':'application/json'}};
   if(body) opts.body=JSON.stringify(body);
   const r=await fetch(BASE+path,opts);
-  const j=await r.json();
-  if(!r.ok) throw{status:r.status,detail:j.detail||JSON.stringify(j)};
-  return j;
+  const raw=await r.text();
+  let parsed=null;
+  if(raw){
+    try{ parsed=JSON.parse(raw); }catch(_err){ parsed=null; }
+  }
+  if(!r.ok){
+    throw{
+      status:r.status,
+      detail:(parsed&&parsed.detail)||raw||`HTTP ${r.status}`,
+      raw,
+    };
+  }
+  return parsed!==null?parsed:{};
 }
 
 function _setToggleButton(buttonId,isOpen,openLabel,closeLabel){
@@ -723,10 +682,9 @@ async function detectHotspots(){
   try{
     const j=await api('POST','/detect-hotspot',payload);
     $('detect-status').innerHTML=badge('ok')+' '+j.hotspot_count+' hotspots detected';
-    log('detect-log','Response (meta):\\n'+JSON.stringify({hotspots_csv:j.hotspots_csv,hotspot_count:j.hotspot_count,ndp:j.ndp},null,2));
+    log('detect-log','Response (meta):\\n'+JSON.stringify({hotspots_csv:j.hotspots_csv,hotspots_url:j.hotspots_url,hotspot_count:j.hotspot_count},null,2));
     if(j.preview&&j.preview.length)$('hotspot-preview').innerHTML=makeTable(j.preview);
-    const ndp=j.ndp||{};const reg=(ndp.registered||[])[0]||{};
-    _lastHotUrl=reg.url||j.hotspots_csv;$('ss-file').value=_lastHotUrl;markStepDone(3);
+    _lastHotUrl=j.hotspots_url||j.hotspots_csv;$('ss-file').value=_lastHotUrl;markStepDone(3);
   }catch(e){$('detect-status').innerHTML=badge('failed')+' '+e.detail;log('detect-log','ERROR: '+JSON.stringify(e))}
   btn.disabled=false;
 }
@@ -756,9 +714,10 @@ function renderHotspotFieldOptions(fields, defaultThreshold){
     el.innerHTML='<p style="color:var(--muted);font-size:.8rem">No numeric threshold fields detected.</p>';
     return;
   }
+  const hasPm25=fields.includes('pm2p5_ugm3');
   const rows=fields.map((f,idx)=>{
     const id=_fieldId(f);
-    const checked=(f==='pm2p5_ugm3'||idx===0)?'checked':'';
+    const checked=((hasPm25 && f==='pm2p5_ugm3') || (!hasPm25 && idx===0))?'checked':'';
     return '<div style="display:grid;grid-template-columns:24px 1fr 140px;gap:8px;align-items:center;margin:5px 0">'+
       '<input type="checkbox" data-field="'+f+'" '+checked+'/>'+
       '<code>'+f+'</code>'+
@@ -836,7 +795,7 @@ async function selectSensors(){
   try{
     const j=await api('POST','/select-sensor',payload);
     $('sensor-status').innerHTML=badge('ok')+' '+j.sensors_found+' sensors, '+j.mapping_count+' mappings';
-    log('sensor-log','Response (meta):\\n'+JSON.stringify({sensors_found:j.sensors_found,mapping_count:j.mapping_count,map_csv:j.map_csv},null,2));
+    log('sensor-log','Response (meta):\\n'+JSON.stringify({sensors_found:j.sensors_found,mapping_count:j.mapping_count,map_csv:j.map_csv,map_url:j.map_url},null,2));
     if(j.preview&&j.preview.length)$('sensor-preview').innerHTML=makeTable(j.preview);
     markStepDone(5);
   }catch(e){$('sensor-status').innerHTML=badge('failed')+' '+e.detail;log('sensor-log','ERROR: '+JSON.stringify(e))}
@@ -1045,6 +1004,7 @@ app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
 FILE_KIND_DIRS: Dict[str, Path] = {
     "prediction": PREDICTIONS_DIR,
     "hotspot": HOTSPOTS_DIR,
+    "map": MAP_DIR,
 }
 
 
@@ -1273,6 +1233,11 @@ class StartConsumeRequest(BaseModel):
     max_messages: int = Field(default=5000, ge=1)
 
 
+class ToolInvocationRequest(BaseModel):
+    tool: str
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+
+
 STREAM_CONSUMERS: Dict[str, Dict[str, Any]] = {}
 
 
@@ -1474,6 +1439,7 @@ async def _consume_topic_worker(
                 if current_rows > seen_rows:
                     new_rows = df.iloc[seen_rows:current_rows]
                     added = 0
+                    batch_messages: List[Dict[str, Any]] = []
                     if hasattr(new_rows, "columns") and "payload" in new_rows.columns:
                         for cell in new_rows["payload"].dropna():
                             for msg in _normalize_payload_cell(cell):
@@ -1485,7 +1451,19 @@ async def _consume_topic_worker(
                                 state.setdefault("recent_messages", []).append(msg)
                                 if len(state["recent_messages"]) > recent_limit:
                                     state["recent_messages"] = state["recent_messages"][-recent_limit:]
+                                batch_messages.append(msg)
                                 added += 1
+                    if batch_messages:
+                        processing_order_start = int(state.get("exact_processing_order", 0))
+                        normalized_rows = normalize_live_capture_payloads(
+                            batch_messages,
+                            topic=topic,
+                            processing_order_start=processing_order_start,
+                        )
+                        if normalized_rows:
+                            ingest_result = EXACT_ENGINE.ingest_rows(normalized_rows)
+                            state["exact_processing_order"] = processing_order_start + len(normalized_rows)
+                            state["exact_rows_ingested"] = int(state.get("exact_rows_ingested", 0)) + ingest_result["accepted"]
                     message_count += added if added > 0 else (current_rows - seen_rows)
                     state["message_count"] = message_count
                     seen_rows = current_rows
@@ -1678,6 +1656,8 @@ def _status_payload_from_rq_job(job: Job) -> Dict[str, Any]:
         payload["current_date"] = meta.get("current_date")
     if meta.get("dates") is not None:
         payload["dates"] = meta.get("dates")
+    if meta.get("saved_run_id") is not None:
+        payload["saved_run_id"] = meta.get("saved_run_id")
 
     if mapped_status == "done":
         payload["result"] = job.result
@@ -1693,6 +1673,10 @@ def build_public_prediction_url(file_name: str) -> str:
 
 def build_public_hotspot_url(file_name: str) -> str:
     return _build_public_file_view_url("hotspot", file_name)
+
+
+def build_public_map_url(file_name: str) -> str:
+    return _build_public_file_view_url("map", file_name)
 
 
 def _to_ndp_name_fragment(value: str) -> str:
@@ -2035,11 +2019,15 @@ WORKFLOW_SERVICE = AirQualityWorkflowService(
     hotspots_dir=HOTSPOTS_DIR,
     map_dir=MAP_DIR,
     build_public_prediction_url=build_public_prediction_url,
+    build_public_hotspot_url=build_public_hotspot_url,
+    build_public_map_url=build_public_map_url,
     register_prediction_files_ndp=register_prediction_files_ndp,
     register_hotspot_files_ndp=register_hotspot_files_ndp,
     create_clients=_create_clients,
     logger=logger,
 )
+SAVED_RESULTS_STORE = SavedResultsStore(project_root=PROJECT_ROOT)
+EXACT_ENGINE = ExactEngine(enable_sketches=True)
 
 
 @app.get("/sensors")
@@ -2341,10 +2329,38 @@ def run_prediction_job(req_payload: Dict[str, Any]) -> Dict[str, Any]:
     job = get_current_job(connection=AURORA_QUEUE.connection)
     request_key = None
     preexisting_files: set[str] = set()
+    saved_run_record: Optional[Dict[str, Any]] = None
 
     try:
         request_key = str((job.meta or {}).get("request_key") or "") if job else None
         _set_job_meta(job, step="init")
+        saved_run_record = SAVED_RESULTS_STORE.start_run(
+            region=req.region.dict(),
+            requested_dates=req.dates.dict(),
+            fixed_aurora_config=dict(FIXED_AURORA_CONFIG),
+            overwrite=req.overwrite,
+            trigger_mode="rq" if job is not None else "direct",
+        )
+        _set_job_meta(job, saved_run_id=saved_run_record["run_id"])
+
+        if not req.overwrite:
+            existing = _find_matching_prediction_dataset(req)
+            if existing:
+                saved_run_record["result_source"] = "catalog_reuse"
+                final_record = SAVED_RESULTS_STORE.finish_run(
+                    saved_run_record,
+                    status="success",
+                    result=existing["result"],
+                    error_summary=None,
+                )
+                _set_job_meta(job, step="complete", result_source="catalog_reuse")
+                return {
+                    **existing["result"],
+                    "saved_run_id": final_record["run_id"],
+                    "daily_summary_path": final_record.get("daily_summary_path"),
+                    "result_source": "catalog_reuse",
+                    "reused_prediction_dataset": existing.get("dataset_name"),
+                }
 
         cams_dir = (PROJECT_ROOT / Path("data/raw/cams_raw")).resolve()
         cams_dir.mkdir(parents=True, exist_ok=True)
@@ -2371,10 +2387,29 @@ def run_prediction_job(req_payload: Dict[str, Any]) -> Dict[str, Any]:
             on_progress=_progress,
         )
 
-        _set_job_meta(job, step="complete")
-        return result
+        final_record = SAVED_RESULTS_STORE.finish_run(
+            saved_run_record,
+            status="success",
+            result=result,
+            error_summary=None,
+        )
+
+        _set_job_meta(job, step="complete", result_source="generated")
+        return {
+            **result,
+            "saved_run_id": final_record["run_id"],
+            "daily_summary_path": final_record.get("daily_summary_path"),
+            "result_source": "generated",
+        }
 
     except Exception as ex:
+        if saved_run_record is not None:
+            SAVED_RESULTS_STORE.finish_run(
+                saved_run_record,
+                status="failed",
+                result=None,
+                error_summary=str(ex),
+            )
         _set_job_meta(job, step="failed", error=str(ex), traceback=traceback.format_exc())
         raise
     finally:
@@ -2407,6 +2442,78 @@ def run_prediction_job(req_payload: Dict[str, Any]) -> Dict[str, Any]:
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+@app.get("/exact/hourly")
+def get_exact_hourly(
+    hour_bucket: Optional[str] = Query(default=None),
+    stid: Optional[str] = Query(default=None),
+    sensor: Optional[str] = Query(default=None),
+):
+    items = EXACT_ENGINE.get_hourly(hour_bucket=hour_bucket, stid=stid, sensor=sensor)
+    return {"count": len(items), "items": items}
+
+
+@app.get("/exact/daily")
+def get_exact_daily(
+    day_bucket: Optional[str] = Query(default=None),
+    stid: Optional[str] = Query(default=None),
+    sensor: Optional[str] = Query(default=None),
+):
+    items = EXACT_ENGINE.get_daily(day_bucket=day_bucket, stid=stid, sensor=sensor)
+    return {"count": len(items), "items": items}
+
+
+@app.get("/exact/latest")
+def get_exact_latest(
+    stid: Optional[str] = Query(default=None),
+    sensor: Optional[str] = Query(default=None),
+):
+    items = EXACT_ENGINE.get_latest(stid=stid, sensor=sensor)
+    return {"count": len(items), "items": items}
+
+
+@app.get("/exact/stream-health")
+def get_exact_stream_health():
+    return EXACT_ENGINE.get_stream_health()
+
+
+@app.get("/exact/hourly-quantiles")
+def get_exact_hourly_quantiles(
+    hour_bucket: Optional[str] = Query(default=None),
+    stid: Optional[str] = Query(default=None),
+    sensor: Optional[str] = Query(default=None),
+):
+    items = EXACT_ENGINE.get_hourly_quantiles(hour_bucket=hour_bucket, stid=stid, sensor=sensor)
+    return {"count": len(items), "items": items}
+
+
+@app.get("/exact/daily-quantiles")
+def get_exact_daily_quantiles(
+    day_bucket: Optional[str] = Query(default=None),
+    stid: Optional[str] = Query(default=None),
+    sensor: Optional[str] = Query(default=None),
+):
+    items = EXACT_ENGINE.get_daily_quantiles(day_bucket=day_bucket, stid=stid, sensor=sensor)
+    return {"count": len(items), "items": items}
+
+
+@app.post("/exact/reset")
+def reset_exact_engine():
+    return EXACT_ENGINE.reset()
+
+
+@app.post("/tools/invoke")
+def invoke_agent_tool(request: ToolInvocationRequest):
+    try:
+        return invoke_tool(
+            request.tool,
+            request.arguments,
+            exact_engine=EXACT_ENGINE,
+            saved_results_store=SAVED_RESULTS_STORE,
+        )
+    except ToolDispatchError as ex:
+        raise HTTPException(status_code=400, detail=str(ex)) from ex
 
 
 @app.post("/run-model")
@@ -2505,6 +2612,37 @@ def status(job_id: str):
         raise HTTPException(status_code=503, detail=f"Queue backend unavailable: {ex}") from ex
 
     return _status_payload_from_rq_job(job)
+
+
+@app.get("/saved-results/runs")
+def list_saved_runs(
+    limit: int = Query(default=20, ge=1, le=100),
+    region: Optional[str] = Query(default=None),
+    status: Optional[Literal["running", "success", "failed"]] = Query(default=None),
+):
+    return {
+        "runs": SAVED_RESULTS_STORE.list_runs(
+            limit=limit,
+            region=region,
+            status=status,
+        )
+    }
+
+
+@app.get("/saved-results/runs/{run_id}")
+def saved_run_status(run_id: str):
+    record = SAVED_RESULTS_STORE.get_run(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="saved run not found")
+    return record
+
+
+@app.get("/saved-results/daily-summary/latest")
+def latest_daily_summary(region: Optional[str] = Query(default=None)):
+    summary = SAVED_RESULTS_STORE.get_latest_summary(region=region)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="daily summary not found")
+    return summary
 
 
 @app.get("/predictions")
