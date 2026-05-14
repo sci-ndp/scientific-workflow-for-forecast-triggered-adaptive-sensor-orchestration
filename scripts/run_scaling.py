@@ -19,11 +19,16 @@ import io
 import json
 import math
 import os
+import sys
 import time
 from contextlib import redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Sequence
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 try:
     from src.experiment_metrics import (
@@ -386,13 +391,7 @@ def _load_detection_fn():
     try:
         from src.event_detection import detect_hotspots_for_day
     except Exception:
-        # Running as "python scripts/run_scaling.py" may omit repo root from
-        # sys.path; add it once, then retry src import.
-        import sys
-
-        root = str(Path(__file__).resolve().parents[1])
-        if root not in sys.path:
-            sys.path.insert(0, root)
+        # Running from unusual contexts may still require a direct fallback.
         try:
             from src.event_detection import detect_hotspots_for_day
         except Exception:
@@ -565,6 +564,30 @@ def write_scaling_tables(csv_path: Path) -> None:
     summary_csv = csv_path.with_name("scaling_summary.csv")
     by_size.to_csv(summary_csv, index=False)
     print(f"[ok] scaling summary: {summary_csv}")
+
+    ci_export = by_size.rename(
+        columns={
+            "runs": "n",
+            "total_p50_ci_lo_s": "total_p50_lo_s",
+            "total_p50_ci_hi_s": "total_p50_hi_s",
+            "total_p95_ci_lo_s": "total_p95_lo_s",
+            "total_p95_ci_hi_s": "total_p95_hi_s",
+        }
+    )[
+        [
+            "size",
+            "n",
+            "total_p50_s",
+            "total_p95_s",
+            "total_p50_lo_s",
+            "total_p50_hi_s",
+            "total_p95_lo_s",
+            "total_p95_hi_s",
+        ]
+    ]
+    ci_csv = csv_path.with_name("scaling_ci_summary.csv")
+    ci_export.to_csv(ci_csv, index=False)
+    print(f"[ok] scaling CI summary: {ci_csv}")
 
     by_size_k = _summarize_by_size_k(df)
     summary_k_csv = csv_path.with_name("size_k_summary.csv")

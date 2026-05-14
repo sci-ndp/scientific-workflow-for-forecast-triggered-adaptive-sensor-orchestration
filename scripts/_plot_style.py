@@ -73,10 +73,8 @@ def apply_style():
 def save(fig, stem, fig_dir):
     from pathlib import Path
     fig_dir = Path(fig_dir)
-    svg = fig_dir / f"{stem}.svg"
     png = fig_dir / f"{stem}.png"
-    fig.savefig(svg, format="svg")
     fig.savefig(png, format="png")
     plt.close(fig)
     print(f"output: {png}")
-    return svg, png
+    return png

@@ -191,22 +191,24 @@ python3 scripts/plot_selection_comparison.py \
 This regenerates:
 
 - `paper/figures/scaling_latency_vs_sensor_count_ci.png`
-- `paper/figures/scaling_latency_vs_sensor_count_ci.svg`
 - `paper/figures/scaling_total_latency_ecdf.png`
-- `paper/figures/scaling_total_latency_ecdf.svg`
 - `paper/figures/linear_vs_kdtree_selection_clean.png`
-- `paper/figures/linear_vs_kdtree_selection_clean.svg`
 
-The pushdown summary figure is derived from the pushdown CSV outputs:
+The pushdown summary CSVs and figure can be regenerated with:
 
 ```bash
 python3 scripts/run_pushdown.py
+
+python3 scripts/plot_pushdown_summary.py \
+  --summary-csv paper/results/pushdown_speedup_table.csv \
+  --figures-dir paper/figures
 ```
 
 This refreshes:
 
 - `paper/results/exp_pushdown.csv`
 - `paper/results/pushdown_speedup_table.csv`
+- `paper/figures/pushdown_summary.png`
 
 ### Full experiment rerun from archived forecast inputs
 
@@ -222,6 +224,10 @@ python3 scripts/run_scaling.py \
   --out-csv paper/results/exp_runs_kdtree.csv
 
 python3 scripts/run_pushdown.py
+
+python3 scripts/plot_pushdown_summary.py \
+  --summary-csv paper/results/pushdown_speedup_table.csv \
+  --figures-dir paper/figures
 
 python3 scripts/run_adapters.py \
   --linear-runs-csv paper/results/exp_runs.csv \
@@ -246,9 +252,10 @@ These commands write or refresh:
 - `paper/results/exp_pushdown.csv`
 - `paper/results/pushdown_speedup_table.csv`
 - `paper/results/exp_selection.csv`
-- `paper/figures/scaling_latency_vs_sensor_count_ci.{png,svg}`
-- `paper/figures/scaling_total_latency_ecdf.{png,svg}`
-- `paper/figures/linear_vs_kdtree_selection_clean.{png,svg}`
+- `paper/figures/scaling_latency_vs_sensor_count_ci.png`
+- `paper/figures/scaling_total_latency_ecdf.png`
+- `paper/figures/linear_vs_kdtree_selection_clean.png`
+- `paper/figures/pushdown_summary.png`
 
 ### Demo notebook path
 

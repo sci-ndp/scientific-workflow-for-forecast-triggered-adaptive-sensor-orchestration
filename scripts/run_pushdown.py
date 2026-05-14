@@ -13,10 +13,15 @@ import argparse
 import csv
 import io
 import math
+import sys
 import time
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any, Dict, List, Sequence
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 try:
     from src.experiment_metrics import (
@@ -153,13 +158,7 @@ def _load_detection_fn():
     try:
         from src.event_detection import detect_hotspots_for_day
     except Exception:
-        # Running as "python scripts/run_pushdown.py" may not include repo root
-        # on sys.path. Add it once, then retry src import.
-        import sys
-
-        root = str(Path(__file__).resolve().parents[1])
-        if root not in sys.path:
-            sys.path.insert(0, root)
+        # Running from unusual contexts may still require a direct fallback.
         try:
             from src.event_detection import detect_hotspots_for_day
         except Exception:

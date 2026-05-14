@@ -5,13 +5,16 @@
   "outputs": [
     "paper/results/exp_runs.csv",
     "paper/results/exp_runs_kdtree.csv",
+    "paper/results/scaling_summary.csv",
+    "paper/results/scaling_ci_summary.csv",
+    "paper/results/size_k_summary.csv",
+    "paper/results/latency_percentiles.csv",
     "paper/results/exp_pushdown.csv",
     "paper/results/pushdown_speedup_table.csv",
-    "paper/results/scaling_ci_summary.csv",
-    "paper/figures/scaling_latency_vs_sensor_count_ci.svg",
-    "paper/figures/scaling_total_latency_ecdf.svg",
-    "paper/figures/k_sensitivity_total_p50.svg",
-    "paper/figures/linear_vs_kdtree_selection_clean.svg",
-    "paper/figures/pushdown_summary.svg"
+    "paper/results/exp_selection.csv",
+    "paper/figures/scaling_latency_vs_sensor_count_ci.png",
+    "paper/figures/scaling_total_latency_ecdf.png",
+    "paper/figures/linear_vs_kdtree_selection_clean.png",
+    "paper/figures/pushdown_summary.png"
   ]
 }

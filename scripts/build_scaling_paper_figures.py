@@ -19,12 +19,12 @@ import pandas as pd
 
 REPO = Path(__file__).resolve().parents[1]
 
-# Extracted from paper/figures/scaling_latency_vs_sensor_count_ci.svg (Apr 2026 build)
+# Extracted from paper/figures/scaling_latency_vs_sensor_count_ci.png (Apr 2026 build)
 CI_COLOR_P50 = "#2171b5"
 CI_COLOR_P95 = "#6baed6"
 CI_LINEWIDTH = 1.4
 
-# Sequential Blues for cohort lines (scaling_total_latency_ecdf.svg), sizes 8→2365
+# Sequential Blues for cohort lines (scaling_total_latency_ecdf.png), sizes 8→2365
 ECDF_COLORS = ["#d6e6f4", "#abd0e6", "#6aaed6", "#3787c0", "#105ba4"]
 
 # Figure size ≈ 245.28 × 169.68 pt (IEEE column-friendly)
@@ -61,6 +61,15 @@ def _apply_matplotlib_style() -> None:
 def plot_ci(ci_csv: Path, out_base: Path) -> None:
     _apply_matplotlib_style()
     ci = pd.read_csv(ci_csv).sort_values("size")
+    if "total_p50_lo_s" not in ci.columns and "total_p50_ci_lo_s" in ci.columns:
+        ci = ci.rename(
+            columns={
+                "total_p50_ci_lo_s": "total_p50_lo_s",
+                "total_p50_ci_hi_s": "total_p50_hi_s",
+                "total_p95_ci_lo_s": "total_p95_lo_s",
+                "total_p95_ci_hi_s": "total_p95_hi_s",
+            }
+        )
     sizes = ci["size"].to_numpy(dtype=float)
     p50 = ci["total_p50_s"].to_numpy()
     p95 = ci["total_p95_s"].to_numpy()
@@ -112,8 +121,7 @@ def plot_ci(ci_csv: Path, out_base: Path) -> None:
     ax.grid(True)
     ax.legend(loc="upper left", framealpha=0.95)
 
-    for ext in (".svg", ".png"):
-        fig.savefig(out_base.with_suffix(ext))
+    fig.savefig(out_base.with_suffix(".png"))
     plt.close(fig)
 
 
@@ -158,8 +166,7 @@ def plot_ecdf(runs_csv: Path, out_base: Path) -> None:
     )
     leg.get_title().set_fontsize(9.6)
 
-    for ext in (".svg", ".png"):
-        fig.savefig(out_base.with_suffix(ext))
+    fig.savefig(out_base.with_suffix(".png"))
     plt.close(fig)
 
 
@@ -172,7 +179,7 @@ def main() -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     plot_ci(args.ci, args.out_dir / "scaling_latency_vs_sensor_count_ci")
     plot_ecdf(args.runs, args.out_dir / "scaling_total_latency_ecdf")
-    print(f"[ok] wrote CI + ECDF (PNG/SVG) under {args.out_dir}")
+    print(f"[ok] wrote CI + ECDF (PNG) under {args.out_dir}")
 
 
 if __name__ == "__main__":

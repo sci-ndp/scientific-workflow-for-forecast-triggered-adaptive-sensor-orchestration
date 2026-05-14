@@ -90,7 +90,7 @@ from ndp_ep import APIClient
 
 API_URL = "http://your-api-url.com"
 USERNAME = "your_username"
-USERNAME = "your_password"
+PASSWORD = "your_password"
 
 client = APIClient(base_url=API_URL, username=USERNAME, password=PASSWORD)
 streaming = StreamingClient(client)
