@@ -1,0 +1,4 @@
+provider: beeai
+model: openai:gpt-4o-mini
+description: Default BeeAI profile targeting the managed OpenAI GPT-4o-mini deployment.
+options: {}

@@ -1,0 +1,12 @@
+name: SciDX Catalog MCP
+server_name: SciDX Catalog MCP
+version: 0.1.0
+description: >-
+  Tools for managing SciDX streaming datasets, including metadata inspection,
+  dataset registration, and discovery of consumption methods.
+tags:
+  - catalog
+  - datasets
+dependencies:
+  - fastmcp
+  - ndp_ep

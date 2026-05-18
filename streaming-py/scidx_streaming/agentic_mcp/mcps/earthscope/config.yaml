@@ -1,0 +1,19 @@
+name: EarthScope Demo MCP
+server_name: EarthScope Streaming MCP
+version: 0.1.0
+description: >
+  Pre-configured streaming tools tailored for the EarthScope demonstration,
+  including canned filters, station discovery, and interactive visualization helpers.
+tags:
+  - earthscope
+  - demo
+  - streaming
+dependencies:
+  - fastmcp
+consumption_method_ids:
+  - "9591012f-50da-481d-bf0f-cfd0d48a2f25"
+username: cmeertens
+password: Nxx4H41PbHXR
+search_server: local
+visualization_backend: auto
+visualization_port: 55555

@@ -1,0 +1,9 @@
+provider: beeai
+model: ollama:qwen2:7b
+description: Run BeeAI against a local Ollama instance serving Mixtral 8x7B.
+options:
+  #api_base: http://ollama:11434
+  #base_url: http://ollama:11434
+  base_url: http://host.docker.internal:11435
+  api_base: http://host.docker.internal:11435
+  temperature: 0.2

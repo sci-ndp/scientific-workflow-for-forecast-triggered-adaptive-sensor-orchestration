@@ -1,0 +1,7 @@
+provider: gemini
+model: models/gemini-2.5-flash
+description: Google Gemini Flash profile tuned for SciDX MCP workflows.
+env:
+  api_key: AIzaSyB_JoojWREKqDKK19xOjhXGnr1i-fG17_s
+options:
+  max_history: 8

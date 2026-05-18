@@ -1,0 +1,10 @@
+name: SciDX Filtering MCP
+server_name: SciDX Filtering MCP
+version: 0.1.0
+description: >-
+  Stream visualization and management utilities built around Kafka consumers.
+tags:
+  - filtering
+  - streaming
+dependencies:
+  - fastmcp

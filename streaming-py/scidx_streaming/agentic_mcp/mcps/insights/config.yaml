@@ -1,0 +1,9 @@
+name: SciDX Insights MCP
+description: Service catalog and diagnostic tools for BeeAI-powered SciDX streaming environments.
+version: 0.1.0
+server_name: SciDX Insights MCP
+tags:
+  - insights
+  - diagnostics
+dependencies:
+  - fastmcp

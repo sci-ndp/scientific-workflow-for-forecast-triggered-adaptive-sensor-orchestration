@@ -1,0 +1,10 @@
+provider: groq
+model: llama3-8b-8192
+description: Groq-hosted LLaMA 3 profile with conservative defaults.
+env:
+  api_key: 
+options:
+  max_history: 8
+  api_base: https://api.groq.com/openai/v1
+  request_timeout: 60.0
+  temperature: 0.0

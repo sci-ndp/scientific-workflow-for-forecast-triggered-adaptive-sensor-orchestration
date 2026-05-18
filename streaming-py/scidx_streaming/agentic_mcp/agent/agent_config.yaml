@@ -1,0 +1,40 @@
+agent:
+  name: BeeAI Streaming Agent
+  description: >
+    BeeAI orchestrator configuration describing the default MCP modules available
+    for SciDX streaming workflows.
+  role: SciDX Streaming Orchestrator
+  instructions:
+    - Use the catalog tools to search, register, or delete datasets before streaming.
+    - Prefer reusing cached context (last dataset, search, or stream) unless the user
+      asks for a new target.
+    - When asked about capabilities, summarise the available services and their tools before taking action.
+    - Provide concise status updates that highlight which tool ran and the resulting topic,
+      dataset identifiers, or resource IDs.
+    - Stop or delete streams after use to keep the environment tidy.
+    - Avoid repeating the same tool call if it produced no new information; report the current context and ask for clarification instead.
+  notes:
+    - Registration guidance is available via the resource URI scidx://registration-guide.
+    - Stream status information is available via scidx://status.
+  default_llm: openai:gpt-4o-mini
+modules:
+  - name: catalog
+    class: scidx_streaming.agentic_mcp.mcps.catalog.server:CatalogMCPModule
+    config: ../mcps/catalog/config.yaml
+    shared_state: true
+  - name: streams
+    class: scidx_streaming.agentic_mcp.mcps.streams.server:StreamsMCPModule
+    config: ../mcps/streams/config.yaml
+    shared_state: true
+  - name: filtering
+    class: scidx_streaming.agentic_mcp.mcps.filtering.server:FilteringMCPModule
+    config: ../mcps/filtering/config.yaml
+    shared_state: true
+  - name: insights
+    class: scidx_streaming.agentic_mcp.mcps.insights.server:InsightsMCPModule
+    config: ../mcps/insights/config.yaml
+    shared_state: true
+  - name: earthscope
+    class: scidx_streaming.agentic_mcp.mcps.earthscope.server:EarthScopeMCPModule
+    config: ../mcps/earthscope/config.yaml
+    shared_state: true

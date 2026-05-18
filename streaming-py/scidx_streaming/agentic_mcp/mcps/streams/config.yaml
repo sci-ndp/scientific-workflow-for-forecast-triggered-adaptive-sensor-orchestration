@@ -1,0 +1,12 @@
+name: SciDX Streams MCP
+server_name: SciDX Streams MCP
+version: 0.1.0
+description: >-
+  Kafka producer creation tools that leverage cached datasets and consumption
+  methods to start new SciDX streams.
+tags:
+  - streams
+  - kafka
+  - producers
+dependencies:
+  - fastmcp
