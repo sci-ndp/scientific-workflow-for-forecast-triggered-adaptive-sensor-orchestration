@@ -61,8 +61,6 @@ In our deployment, the public demo URLs point to that private machine:
 - `https://dev.air-quality.ndp.utah.edu/` -> local `http://localhost:8000/`
 - `https://dev.air-quality.ndp.utah.edu/ep/ui/` -> local `http://localhost:8002/ep/ui/`
 
-The `ui/` folder is required for the Docker demo when you want the endpoint web interface at `/ep/ui/`. If `ui/` is omitted, the API service can still run, but the demo endpoint UI will not be available.
-
 This forwarding setup is specific to our demo deployment. Other users can deploy the system however they prefer on their own infrastructure.
 
 The public endpoints are provided so others can try the system, explore the UI, and get a sense of the workflow behavior. They are proof-of-concept demo services, not production deployments.
@@ -78,7 +76,7 @@ pip install -e ./streaming-py
 uvicorn src.forecast_api:app --host 0.0.0.0 --port 8000
 ```
 
-The experiment scripts that query NDP discovery expect environment variables such as `API_URL`, `TOKEN`, `SERVER`, and `SERVICE_BASE_URL` to be available through your shell or a local `.env` file.
+**The experiment scripts that query NDP discovery expect environment variables such as `API_URL`, `TOKEN`, `SERVER`, and `SERVICE_BASE_URL` to be available through your shell or a local `.env` file.**
 
 ## Single-Day Demo
 
