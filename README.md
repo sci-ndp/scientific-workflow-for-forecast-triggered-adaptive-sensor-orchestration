@@ -34,7 +34,7 @@ The hosted notebook and public web UI are proof-of-concept demo environments, no
 - `paper/figures/`: generated figure assets referenced by the manuscript.
 - `notebooks/aq.ipynb`: interactive notebook for the air-quality workflow walkthrough.
 - `streaming-py/`: local editable copy of the SciDx streaming client used by the service.
-- `ui/`: UI assets used by the endpoint web interface (`/ep/ui/`) in the Docker demo deployment.
+- `ui/`: UI assets used by the endpoint web interface in the Docker demo deployment.
 
 ## Quick Start
 
