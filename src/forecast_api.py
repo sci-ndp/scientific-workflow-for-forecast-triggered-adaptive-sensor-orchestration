@@ -1,7 +1,6 @@
 import uuid
 import traceback
 import asyncio
-import inspect
 import os
 import re
 import math
@@ -31,14 +30,13 @@ warnings.filterwarnings(
     message=r"(?s).*google\.generativeai.*",
     category=FutureWarning,
 )
-from scidx_streaming import StreamingClient
+from scidx_streaming_v2 import StreamingClient
 import logging
 
+from src.streaming_support import (
+    MessageInbox, prepare_consumer, register_dataset_resources, resource_selectors,
+)
 from src.air_quality_workflow_service import AirQualityWorkflowService
-from src.agent_tools import ToolDispatchError, invoke_tool
-from src.exact_engine import ExactEngine
-from src.phase2_station_log import normalize_live_capture_payloads
-from src.saved_results import SavedResultsStore
 
 app = FastAPI(title="Forecast Service", version="1.0")
 
@@ -826,6 +824,8 @@ async function loadSensorList(){
   btn.disabled=false;
 }
 
+const _resourceDatasets=new Map();
+
 function useSensorForCM(name){$('cm-sensor-name').value=name;lookupConsumptionMethod()}
 
 async function lookupConsumptionMethod(){
@@ -840,6 +840,7 @@ async function lookupConsumptionMethod(){
     $('cm-status').innerHTML=badge('ok')+' '+j.count+' methods';
     log('cm-log','GET /sensors/'+name+'/consumption-method\\n'+JSON.stringify(j,null,2));
     const methods=j.consumption_methods||[];
+    methods.forEach(m=>_resourceDatasets.set(m.id,j.dataset_name||name));
     if(methods.length){
       $('cm-table').innerHTML=makeTable(methods.map(m=>({
         id:m.id,name:m.name||'',type:m.type||'',
@@ -873,6 +874,8 @@ async function createStream(){
   if(!ids.length){$('stream-create-status').innerHTML='<span style="color:var(--danger)">Enter at least one consumption method ID</span>';btn.disabled=false;return}
   const params=new URLSearchParams();
   ids.forEach(id=>params.append('consumption_method_ids',id));
+  [...new Set(ids.map(id=>_resourceDatasets.get(id)).filter(Boolean))]
+    .forEach(name=>params.append('dataset_names',name));
   filters.forEach(f=>params.append('filter_semantics',f));
   if(server)params.append('server',server);
   log('stream-create-log','POST /streams/create?'+params.toString());
@@ -1233,11 +1236,6 @@ class StartConsumeRequest(BaseModel):
     max_messages: int = Field(default=5000, ge=1)
 
 
-class ToolInvocationRequest(BaseModel):
-    tool: str
-    arguments: Dict[str, Any] = Field(default_factory=dict)
-
-
 STREAM_CONSUMERS: Dict[str, Dict[str, Any]] = {}
 
 
@@ -1338,28 +1336,6 @@ def _methods_from_dataset(ds: Dict[str, Any]) -> List[Dict[str, Any]]:
     return methods
 
 
-def _count_new_messages(consumer: Any, last_rows: int) -> tuple[int, int]:
-    df = getattr(consumer, "dataframe", None)
-    if df is None:
-        return 0, last_rows
-    try:
-        current_rows = int(len(df))
-    except Exception:
-        return 0, last_rows
-
-    if current_rows <= last_rows:
-        return 0, last_rows
-    return current_rows - last_rows, current_rows
-
-
-def _normalize_payload_cell(cell: Any) -> List[Dict[str, Any]]:
-    if isinstance(cell, dict):
-        return [cell]
-    if isinstance(cell, list):
-        return [item for item in cell if isinstance(item, dict)]
-    return []
-
-
 def _consume_state_snapshot(state: Dict[str, Any]) -> Dict[str, Any]:
     started_at = state.get("started_at")
     ended_at = state.get("ended_at")
@@ -1406,15 +1382,15 @@ async def _consume_topic_worker(
         return
 
     consumer = None
+    inbox = MessageInbox()
     message_count = int(state.get("message_count", 0))
-    seen_rows = 0
     started_at = datetime.now(timezone.utc)
     deadline = started_at + timedelta(minutes=auto_close_minutes) if mode == "timed" else None
-    recent_limit = 50
 
     try:
-        _, _, streaming = _create_clients(server=server)
-        consumer = streaming.consume_kafka_messages(topic)
+        _, _, streaming = await asyncio.to_thread(_create_clients, server=server)
+        consumer = prepare_consumer(streaming, topic, inbox)
+        await asyncio.to_thread(consumer.start)
 
         while True:
             if state.get("stop_requested"):
@@ -1430,49 +1406,22 @@ async def _consume_topic_worker(
                 state["stop_reason"] = "max_messages_reached"
                 break
 
-            df = getattr(consumer, "dataframe", None)
-            if df is not None:
-                try:
-                    current_rows = int(len(df))
-                except Exception:
-                    current_rows = seen_rows
-                if current_rows > seen_rows:
-                    new_rows = df.iloc[seen_rows:current_rows]
-                    added = 0
-                    batch_messages: List[Dict[str, Any]] = []
-                    if hasattr(new_rows, "columns") and "payload" in new_rows.columns:
-                        for cell in new_rows["payload"].dropna():
-                            for msg in _normalize_payload_cell(cell):
-                                key = json.dumps(msg, sort_keys=True, default=str)
-                                seen_keys = state.setdefault("seen_keys", set())
-                                if key in seen_keys:
-                                    continue
-                                seen_keys.add(key)
-                                state.setdefault("recent_messages", []).append(msg)
-                                if len(state["recent_messages"]) > recent_limit:
-                                    state["recent_messages"] = state["recent_messages"][-recent_limit:]
-                                batch_messages.append(msg)
-                                added += 1
-                    if batch_messages:
-                        processing_order_start = int(state.get("exact_processing_order", 0))
-                        normalized_rows = normalize_live_capture_payloads(
-                            batch_messages,
-                            topic=topic,
-                            processing_order_start=processing_order_start,
-                        )
-                        if normalized_rows:
-                            ingest_result = EXACT_ENGINE.ingest_rows(normalized_rows)
-                            state["exact_processing_order"] = processing_order_start + len(normalized_rows)
-                            state["exact_rows_ingested"] = int(state.get("exact_rows_ingested", 0)) + ingest_result["accepted"]
-                    message_count += added if added > 0 else (current_rows - seen_rows)
-                    state["message_count"] = message_count
-                    seen_rows = current_rows
+            # Callbacks deliver new records even when the bounded dataframe
+            # stays the same length because older records have been evicted.
+            batch_messages: List[Dict[str, Any]] = []
+            for msg in inbox.take(limit=min(1000, max_messages - message_count)):
+                key = json.dumps(msg, sort_keys=True, default=str)
+                seen_keys = state.setdefault("seen_keys", set())
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                batch_messages.append(msg)
+            if batch_messages:
+                state["recent_messages"] = (state.get("recent_messages", []) + batch_messages)[-50:]
+                message_count += len(batch_messages)
+                state["message_count"] = message_count
 
             await asyncio.sleep(poll_interval)
-
-        if state.get("status") == "running":
-            state["status"] = "stopped"
-            state["stop_reason"] = state.get("stop_reason") or "completed"
     except Exception as ex:
         state["status"] = "failed"
         state["stop_reason"] = "error"
@@ -1480,9 +1429,9 @@ async def _consume_topic_worker(
     finally:
         if consumer is not None:
             try:
-                consumer.stop()
+                await asyncio.to_thread(consumer.stop)
             except Exception:
-                pass
+                logger.exception("Failed to stop consumer for %s", topic)
         state["ended_at"] = _iso_utc()
         state["message_count"] = message_count
 
@@ -1656,8 +1605,6 @@ def _status_payload_from_rq_job(job: Job) -> Dict[str, Any]:
         payload["current_date"] = meta.get("current_date")
     if meta.get("dates") is not None:
         payload["dates"] = meta.get("dates")
-    if meta.get("saved_run_id") is not None:
-        payload["saved_run_id"] = meta.get("saved_run_id")
 
     if mapped_status == "done":
         payload["result"] = job.result
@@ -1778,26 +1725,7 @@ def register_prediction_files_ndp(
     logger.debug("Prepared dataset metadata and %d methods", len(methods))
     logger.debug("Dataset metadata preview: %s", {k: dataset_metadata.get(k) for k in ("name", "title", "owner_org")})
     try:
-        # remove any existing dataset with the same name
-        try:
-            client.delete_resource_by_name(dataset_name, server=server)
-        except Exception:
-            logger.debug("No existing dataset to delete or delete failed (continuing)")
-
-        # Prefer direct client.register_dataset if available, otherwise use streaming helper
-        if hasattr(client, "register_dataset"):
-            try:
-                logger.debug("Calling client.register_dataset for %s", dataset_name)
-                ds = client.register_dataset(dataset_metadata=dataset_metadata, methods=methods, server=server)
-                logger.debug("client.register_dataset returned: %s", ds)
-            except TypeError:
-                logger.debug("client.register_dataset raised TypeError, falling back to streaming.register_data_source")
-                ds = streaming.register_data_source(dataset_metadata=dataset_metadata, methods=methods, server=server)
-                logger.debug("streaming.register_data_source returned: %s", ds)
-        else:
-            logger.debug("Using streaming.register_data_source for %s", dataset_name)
-            ds = streaming.register_data_source(dataset_metadata=dataset_metadata, methods=methods, server=server)
-            logger.debug("streaming.register_data_source returned: %s", ds)
+        ds = register_dataset_resources(client, streaming, dataset_metadata, methods, server=server)
 
         registered = []
         for fpath, method in zip(file_paths, methods):
@@ -1877,18 +1805,7 @@ def register_hotspot_files_ndp(
         )
 
     try:
-        try:
-            client.delete_resource_by_name(dataset_name, server=server)
-        except Exception:
-            logger.debug("No existing hotspot dataset to delete or delete failed (continuing)")
-
-        if hasattr(client, "register_dataset"):
-            try:
-                ds = client.register_dataset(dataset_metadata=dataset_metadata, methods=methods, server=server)
-            except TypeError:
-                ds = streaming.register_data_source(dataset_metadata=dataset_metadata, methods=methods, server=server)
-        else:
-            ds = streaming.register_data_source(dataset_metadata=dataset_metadata, methods=methods, server=server)
+        ds = register_dataset_resources(client, streaming, dataset_metadata, methods, server=server)
 
         registered = []
         for fpath, method in zip(file_paths, methods):
@@ -2026,8 +1943,6 @@ WORKFLOW_SERVICE = AirQualityWorkflowService(
     create_clients=_create_clients,
     logger=logger,
 )
-SAVED_RESULTS_STORE = SavedResultsStore(project_root=PROJECT_ROOT)
-EXACT_ENGINE = ExactEngine(enable_sketches=True)
 
 
 @app.get("/sensors")
@@ -2059,45 +1974,26 @@ def get_sensor_consumption_method(
     server: Optional[str] = Query(default=None, description="Optional server override."),
 ):
     resolved_server, client, streaming = _create_clients(server=server)
-    dataset = None
-
-    # Primary path: use streaming consumption-method search.
     try:
-        methods_search = streaming.search_consumption_methods(
-            [sensor_name, "sensors"],
-            server=resolved_server,
-        )
-        for ds in methods_search or []:
-            if isinstance(ds, dict) and ds.get("name") == sensor_name:
-                dataset = ds
-                break
-    except Exception:
-        # Fall through to dataset lookup fallback.
-        dataset = None
+        records = streaming.search_resources(terms=[sensor_name], server=resolved_server)
+        methods = [
+            {"id": record.id, "name": record.name, "type": record.type}
+            for record in records if record.dataset_name == sensor_name
+        ]
+        if not methods:
+            datasets = client.search_datasets(terms=[sensor_name], server=resolved_server)
+            dataset = next((ds for ds in datasets or [] if ds.get("name") == sensor_name), None)
+            if dataset is None:
+                raise HTTPException(status_code=404, detail=f"Sensor dataset not found: {sensor_name}")
+            methods = _methods_from_dataset(dataset)
+    except HTTPException:
+        raise
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=f"Sensor resource lookup failed: {ex}") from ex
 
-    # Fallback path: dataset search by exact name.
-    if dataset is None:
-        try:
-            datasets = client.search_datasets(
-                terms=[sensor_name],
-                keys=["extras_dataset_kind", "extras_region"],
-                server=resolved_server,
-            )
-        except Exception as ex:
-            raise HTTPException(status_code=500, detail=f"Dataset lookup failed: {ex}")
-
-        for ds in datasets or []:
-            if isinstance(ds, dict) and ds.get("name") == sensor_name:
-                dataset = ds
-                break
-
-    if dataset is None:
-        raise HTTPException(status_code=404, detail=f"Sensor dataset not found: {sensor_name}")
-
-    methods = _methods_from_dataset(dataset)
     return {
         "sensor_name": sensor_name,
-        "dataset_name": dataset.get("name"),
+        "dataset_name": sensor_name,
         "consumption_methods": methods,
         "count": len(methods),
     }
@@ -2111,7 +2007,11 @@ async def create_stream(
     ),
     filter_semantics: Optional[List[str]] = Query(
         default=None,
-        description="Optional filter semantics. Repeat query param to add multiple values.",
+        description="V2 filter comparisons, e.g. value > 10. Repeat for multiple rules.",
+    ),
+    dataset_names: Optional[List[str]] = Query(
+        default=None,
+        description="Optional source dataset names to avoid catalog-wide UUID searches on older endpoints.",
     ),
     server: Optional[str] = Query(default=None, description="Optional server override."),
 ):
@@ -2119,39 +2019,32 @@ async def create_stream(
     if not method_ids:
         raise HTTPException(status_code=422, detail="consumption_method_ids must contain at least one ID.")
 
-    resolved_server, _, streaming = _create_clients(server=server)
+    resolved_server, client, streaming = await asyncio.to_thread(_create_clients, server=server)
     try:
-        stream_result = streaming.create_kafka_stream(
-            consumption_method_ids=method_ids,
-            filter_semantics=filter_semantics or [],
-            server=resolved_server,
+        selectors = await asyncio.to_thread(
+            resource_selectors, client, method_ids, server=resolved_server, dataset_names=dataset_names,
         )
-        if inspect.isawaitable(stream_result):
-            stream_result = await stream_result
+        filters = streaming.compile_filters(filter_semantics or [])
+    except (ValueError, TypeError) as ex:
+        raise HTTPException(status_code=422, detail=str(ex)) from ex
+    try:
+        stream_result = await streaming.acreate_stream(
+            resources=selectors, filters=filters, server=resolved_server,
+        )
+    except NotImplementedError as ex:
+        raise HTTPException(status_code=501, detail=f"Source ingestion is unavailable in streaming_v2: {ex}") from ex
     except Exception as ex:
-        raise HTTPException(status_code=500, detail=f"Stream creation failed: {ex}")
+        raise HTTPException(status_code=500, detail=f"Stream creation failed: {ex}") from ex
 
-    warnings: List[str] = []
-    data_stream_id = None
-    if isinstance(stream_result, dict):
-        data_stream_id = stream_result.get("data_stream_id") or stream_result.get("topic")
-        raw_warnings = stream_result.get("warnings") or []
-        if isinstance(raw_warnings, list):
-            warnings = [str(w) for w in raw_warnings]
-    else:
-        data_stream_id = getattr(stream_result, "data_stream_id", None) or getattr(stream_result, "topic", None)
-        raw_warnings = getattr(stream_result, "warnings", None)
-        if isinstance(raw_warnings, list):
-            warnings = [str(w) for w in raw_warnings]
-
-    if not data_stream_id:
-        raise HTTPException(status_code=500, detail="Stream created but no data_stream_id was returned.")
-
+    if not stream_result.topic:
+        raise HTTPException(status_code=500, detail="Stream created but no topic was returned.")
+    # Preserve the existing HTTP response contract used by the dashboard.
     return {
-        "data_stream_id": data_stream_id,
+        "data_stream_id": stream_result.topic,
+        "topic": stream_result.topic,
         "consumption_method_ids": method_ids,
         "server": resolved_server,
-        "warnings": warnings,
+        "warnings": [],
     }
 
 
@@ -2329,35 +2222,17 @@ def run_prediction_job(req_payload: Dict[str, Any]) -> Dict[str, Any]:
     job = get_current_job(connection=AURORA_QUEUE.connection)
     request_key = None
     preexisting_files: set[str] = set()
-    saved_run_record: Optional[Dict[str, Any]] = None
+    cams_dir: Optional[Path] = None
 
     try:
         request_key = str((job.meta or {}).get("request_key") or "") if job else None
         _set_job_meta(job, step="init")
-        saved_run_record = SAVED_RESULTS_STORE.start_run(
-            region=req.region.dict(),
-            requested_dates=req.dates.dict(),
-            fixed_aurora_config=dict(FIXED_AURORA_CONFIG),
-            overwrite=req.overwrite,
-            trigger_mode="rq" if job is not None else "direct",
-        )
-        _set_job_meta(job, saved_run_id=saved_run_record["run_id"])
-
         if not req.overwrite:
             existing = _find_matching_prediction_dataset(req)
             if existing:
-                saved_run_record["result_source"] = "catalog_reuse"
-                final_record = SAVED_RESULTS_STORE.finish_run(
-                    saved_run_record,
-                    status="success",
-                    result=existing["result"],
-                    error_summary=None,
-                )
                 _set_job_meta(job, step="complete", result_source="catalog_reuse")
                 return {
                     **existing["result"],
-                    "saved_run_id": final_record["run_id"],
-                    "daily_summary_path": final_record.get("daily_summary_path"),
                     "result_source": "catalog_reuse",
                     "reused_prediction_dataset": existing.get("dataset_name"),
                 }
@@ -2387,38 +2262,21 @@ def run_prediction_job(req_payload: Dict[str, Any]) -> Dict[str, Any]:
             on_progress=_progress,
         )
 
-        final_record = SAVED_RESULTS_STORE.finish_run(
-            saved_run_record,
-            status="success",
-            result=result,
-            error_summary=None,
-        )
-
         _set_job_meta(job, step="complete", result_source="generated")
         return {
             **result,
-            "saved_run_id": final_record["run_id"],
-            "daily_summary_path": final_record.get("daily_summary_path"),
             "result_source": "generated",
         }
 
     except Exception as ex:
-        if saved_run_record is not None:
-            SAVED_RESULTS_STORE.finish_run(
-                saved_run_record,
-                status="failed",
-                result=None,
-                error_summary=str(ex),
-            )
         _set_job_meta(job, step="failed", error=str(ex), traceback=traceback.format_exc())
         raise
     finally:
         try:
-            cams_dir = (PROJECT_ROOT / Path("data/raw/cams_raw")).resolve()
             removed: List[str] = []
             errors: List[Dict[str, str]] = []
             static_name = "aurora-0.4-air-pollution-static.pickle"
-            if cams_dir.exists():
+            if cams_dir is not None and cams_dir.exists():
                 current_files = {p.name for p in cams_dir.iterdir() if p.is_file()}
                 created = current_files - preexisting_files
                 for name in created:
@@ -2442,78 +2300,6 @@ def run_prediction_job(req_payload: Dict[str, Any]) -> Dict[str, Any]:
 @app.get("/health")
 def health():
     return {"ok": True}
-
-
-@app.get("/exact/hourly")
-def get_exact_hourly(
-    hour_bucket: Optional[str] = Query(default=None),
-    stid: Optional[str] = Query(default=None),
-    sensor: Optional[str] = Query(default=None),
-):
-    items = EXACT_ENGINE.get_hourly(hour_bucket=hour_bucket, stid=stid, sensor=sensor)
-    return {"count": len(items), "items": items}
-
-
-@app.get("/exact/daily")
-def get_exact_daily(
-    day_bucket: Optional[str] = Query(default=None),
-    stid: Optional[str] = Query(default=None),
-    sensor: Optional[str] = Query(default=None),
-):
-    items = EXACT_ENGINE.get_daily(day_bucket=day_bucket, stid=stid, sensor=sensor)
-    return {"count": len(items), "items": items}
-
-
-@app.get("/exact/latest")
-def get_exact_latest(
-    stid: Optional[str] = Query(default=None),
-    sensor: Optional[str] = Query(default=None),
-):
-    items = EXACT_ENGINE.get_latest(stid=stid, sensor=sensor)
-    return {"count": len(items), "items": items}
-
-
-@app.get("/exact/stream-health")
-def get_exact_stream_health():
-    return EXACT_ENGINE.get_stream_health()
-
-
-@app.get("/exact/hourly-quantiles")
-def get_exact_hourly_quantiles(
-    hour_bucket: Optional[str] = Query(default=None),
-    stid: Optional[str] = Query(default=None),
-    sensor: Optional[str] = Query(default=None),
-):
-    items = EXACT_ENGINE.get_hourly_quantiles(hour_bucket=hour_bucket, stid=stid, sensor=sensor)
-    return {"count": len(items), "items": items}
-
-
-@app.get("/exact/daily-quantiles")
-def get_exact_daily_quantiles(
-    day_bucket: Optional[str] = Query(default=None),
-    stid: Optional[str] = Query(default=None),
-    sensor: Optional[str] = Query(default=None),
-):
-    items = EXACT_ENGINE.get_daily_quantiles(day_bucket=day_bucket, stid=stid, sensor=sensor)
-    return {"count": len(items), "items": items}
-
-
-@app.post("/exact/reset")
-def reset_exact_engine():
-    return EXACT_ENGINE.reset()
-
-
-@app.post("/tools/invoke")
-def invoke_agent_tool(request: ToolInvocationRequest):
-    try:
-        return invoke_tool(
-            request.tool,
-            request.arguments,
-            exact_engine=EXACT_ENGINE,
-            saved_results_store=SAVED_RESULTS_STORE,
-        )
-    except ToolDispatchError as ex:
-        raise HTTPException(status_code=400, detail=str(ex)) from ex
 
 
 @app.post("/run-model")
@@ -2612,37 +2398,6 @@ def status(job_id: str):
         raise HTTPException(status_code=503, detail=f"Queue backend unavailable: {ex}") from ex
 
     return _status_payload_from_rq_job(job)
-
-
-@app.get("/saved-results/runs")
-def list_saved_runs(
-    limit: int = Query(default=20, ge=1, le=100),
-    region: Optional[str] = Query(default=None),
-    status: Optional[Literal["running", "success", "failed"]] = Query(default=None),
-):
-    return {
-        "runs": SAVED_RESULTS_STORE.list_runs(
-            limit=limit,
-            region=region,
-            status=status,
-        )
-    }
-
-
-@app.get("/saved-results/runs/{run_id}")
-def saved_run_status(run_id: str):
-    record = SAVED_RESULTS_STORE.get_run(run_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="saved run not found")
-    return record
-
-
-@app.get("/saved-results/daily-summary/latest")
-def latest_daily_summary(region: Optional[str] = Query(default=None)):
-    summary = SAVED_RESULTS_STORE.get_latest_summary(region=region)
-    if summary is None:
-        raise HTTPException(status_code=404, detail="daily summary not found")
-    return summary
 
 
 @app.get("/predictions")

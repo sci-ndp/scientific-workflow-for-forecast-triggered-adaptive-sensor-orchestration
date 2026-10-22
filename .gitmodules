@@ -1,0 +1,3 @@
+[submodule "streaming_v2"]
+	path = streaming_v2
+	url = https://github.com/sci-ndp/streaming_v2.git

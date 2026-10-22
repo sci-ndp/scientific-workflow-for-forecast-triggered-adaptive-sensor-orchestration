@@ -1,13 +1,13 @@
 requests
 bs4
-ndp_ep
+ndp-ep>=0.8.0
 pandas
 msgpack
 blosc
 kafka-python
 confluent-kafka
 python-dotenv
-scidx_streaming
+-e ./streaming_v2
 matplotlib
 seaborn>=0.13
 lz4
@@ -32,4 +32,3 @@ redis>=5.0
 rq>=1.16
 pyarrow
 jsonschema
-datasketches

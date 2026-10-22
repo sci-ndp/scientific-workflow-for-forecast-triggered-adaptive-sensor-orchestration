@@ -13,10 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python dependencies first so code-only changes reuse cached layers.
 COPY requirements.txt /app/requirements.txt
-COPY streaming-py /opt/streaming-py
-RUN pip install --no-cache-dir -r /app/requirements.txt \
-    && pip uninstall -y scidx_streaming \
-    && pip install --no-cache-dir -e /opt/streaming-py
+COPY streaming_v2 /app/streaming_v2
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copy the application and static assets into the image.
 COPY . /app

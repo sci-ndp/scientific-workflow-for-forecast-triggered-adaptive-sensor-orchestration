@@ -1,13 +1,28 @@
+x-logging: &bounded-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   redis:
+    logging: *bounded-logging
     image: redis:7-alpine
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   forecast-api:
+    restart: unless-stopped
+    logging: *bounded-logging
+    env_file: .env
     build:
       context: .
       dockerfile: Dockerfile
-    image: stream-simulation-ebus:latest
+    image: forecast-streaming-v2:latest
     working_dir: /app
     ports:
       - "8000:8000"
@@ -20,17 +35,26 @@ services:
       - AQ_MAX_QUEUE_LENGTH=${AQ_MAX_QUEUE_LENGTH:-2}
       - AQ_MAX_ENQUEUES_PER_HOUR=${AQ_MAX_ENQUEUES_PER_HOUR:-2}
     volumes:
-      - ./data:/app/data
+      - ${AQ_DATA_DIR:-./data}:/app/data
       - ${HOME}/.cdsapirc:/root/.cdsapirc:ro
     depends_on:
       - redis
     command: uvicorn src.forecast_api:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   aurora-worker:
+    restart: unless-stopped
+    logging: *bounded-logging
+    env_file: .env
     build:
       context: .
       dockerfile: Dockerfile
-    image: stream-simulation-ebus:latest
+    image: forecast-streaming-v2:latest
     working_dir: /app
     environment:
       - PYTHONPATH=/app
@@ -41,7 +65,7 @@ services:
       - AQ_MAX_QUEUE_LENGTH=${AQ_MAX_QUEUE_LENGTH:-2}
       - AQ_MAX_ENQUEUES_PER_HOUR=${AQ_MAX_ENQUEUES_PER_HOUR:-2}
     volumes:
-      - ./data:/app/data
+      - ${AQ_DATA_DIR:-./data}:/app/data
       - ${HOME}/.cdsapirc:/root/.cdsapirc:ro
     depends_on:
       - redis

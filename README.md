@@ -33,7 +33,8 @@ The hosted notebook and public web UI are proof-of-concept demo environments, no
 - `paper/results/`: experiment outputs and summary tables used to build paper figures.
 - `paper/figures/`: generated figure assets referenced by the manuscript.
 - `notebooks/aq.ipynb`: interactive notebook for the air-quality workflow walkthrough.
-- `streaming-py/`: local editable copy of the SciDx streaming client used by the service.
+- `streaming_v2/`: pinned SciDx v2 submodule used by the service and notebook.
+- `src/streaming_support.py`: resource selection, registration, and Kafka message compatibility helpers.
 - `ui/`: UI assets used by the endpoint web interface in the Docker demo deployment.
 
 ## Quick Start
@@ -49,7 +50,7 @@ Requirements:
 Clone the repository, move into this folder, then start the services:
 
 ```bash
-git clone <repo-url>
+git clone --recurse-submodules <repo-url>
 cd scientific-workflow-for-forecast-triggered-adaptive-sensor-orchestration
 docker compose up --build -d
 ```
@@ -68,11 +69,10 @@ The public endpoints are provided so others can try the system, explore the UI, 
 ### Option 2: Local Python environment
 
 ```bash
-python3 -m venv .venv
+git submodule update --init streaming_v2
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-pip uninstall -y scidx_streaming
-pip install -e ./streaming-py
 uvicorn src.forecast_api:app --host 0.0.0.0 --port 8000
 ```
 
@@ -148,11 +148,10 @@ The main cohort sizes used in the evaluation are:
 Create a local environment and install dependencies:
 
 ```bash
-python3 -m venv .venv
+git submodule update --init streaming_v2
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-pip uninstall -y scidx_streaming
-pip install -e ./streaming-py
 ```
 
 If you need NDP-backed discovery for the scaling runs, create a local `.env` from the example file and fill in the required values:
@@ -267,3 +266,69 @@ Use the hosted notebook or the public UI for a single-day walkthrough. Use the s
 ## Status
 
 This repository is the active development workspace. 
+
+## Streaming v2 migration
+
+This branch uses Python 3.12+ and `scidx_streaming_v2`. Run installation commands
+from the repository root; `requirements.txt` installs the pinned local submodule.
+For an existing checkout, run `git submodule update --init streaming_v2` first.
+The legacy `streaming-py/` source stays on `main`; this branch contains only the
+`streaming_v2/` dependency. Branch changes are committed independently.
+
+Resource UUIDs accepted by the HTTP API are translated to v2 dataset/resource
+name selectors. The optional `dataset_names` query parameter supplies source
+dataset hints on older endpoints; the dashboard passes these automatically to
+avoid slow catalog-wide lookups. The dashboard's `data_stream_id` response field is preserved.
+The notebook uses `search_resources`, `acreate_stream`, and `result.topic`, with
+no hard-coded resource UUID or Kafka topic. Filters use v2 comparison syntax
+such as `value > 10`; natural-language filter descriptions need conversion.
+V2 registers a derived stream on the first source dataset unless a target is
+specified, rather than on every source dataset as the legacy library did.
+
+Consumers explicitly start and stop v2 handles. A shared deserializer reads both
+v2 JSON and legacy Blosc/MessagePack payloads. Callback queues track new messages
+independently of the bounded dataframe preview; queue overflow reports an error.
+The preview consumer assigns partitions before its initial seek to preserve
+the Kafka backlog. The notebook loads complete hotspot and sensor-mapping CSVs
+instead of the API previews and uses the returned prediction URL directly.
+
+WebSocket (`ws://` / `wss://`) source ingestion is not implemented in the pinned
+v2 library. The Synoptic feed cannot create a live stream on this branch until
+that upstream support is added or the feed is bridged into Kafka. Discovery and
+consumption of existing Kafka topics can still be used. The notebook reports
+this limitation at stream creation and clears previous execution outputs.
+Set `AQ_EXISTING_TOPIC` in `.env` to read an existing topic after skipping the
+WebSocket creation cell. Consumption waits at most 60 seconds by default;
+`AQ_MAX_WAIT_SECONDS` and `AQ_MAX_MESSAGES` control those limits. An empty topic
+returns zero messages when the wait expires.
+
+Offline migration checks (no credentials or running services required):
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q tests
+python -m pytest -q streaming_v2/tests -m 'not live'
+```
+
+These checks include the complete FastAPI application and execution of the changed
+notebook cells with offline catalog and Kafka fixtures. The live deployment was
+also checked with archived predictions and a temporary real Kafka topic; fresh
+CAMS/Aurora downloads and inference were not rerun.
+
+The forecast service runs without the optional agent-tool, exact-analytics,
+station-log normalization, and saved-run-history integrations. Their imports,
+initialization, and dependent `/exact/*`, `/tools/invoke`, and `/saved-results/*`
+routes have been removed. Forecast jobs retain their RQ progress/status and return
+prediction results directly; stream consumption retains message counts and recent
+payloads. The notebook does not depend on the removed routes.
+
+See [the migration validation report](docs/streaming-v2-validation.md) for results,
+live endpoint checks, and remaining verification limits.
+
+Compose caps container diagnostics at three 10 MB files. Services restart
+automatically. Set `AQ_DATA_DIR` to preserve existing deployment data when
+switching checkouts. Host log retention requires administrator access:
+
+```bash
+sudo bash scripts/configure_host_log_retention.sh
+```

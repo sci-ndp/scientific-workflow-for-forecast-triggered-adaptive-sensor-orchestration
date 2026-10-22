@@ -546,7 +546,7 @@ class SciDxStreamOrchestrator(StreamOrchestrator):
         active_set: List[SensorCandidate],
         streaming_client: Any,
     ) -> List[ActiveStream]:
-        import asyncio
+        from src.streaming_support import resource_selectors
 
         streams: List[ActiveStream] = []
 
@@ -554,17 +554,15 @@ class SciDxStreamOrchestrator(StreamOrchestrator):
             if not sensor.resource_id:
                 continue
             try:
-                stream = asyncio.get_event_loop().run_until_complete(
-                    streaming_client.create_kafka_stream(
-                        consumption_method_ids=[sensor.resource_id],
-                        filter_semantics=[],
-                        server=sensor.metadata.get("server", "local"),
-                    )
+                server = sensor.metadata.get("server", "local")
+                selectors = resource_selectors(
+                    streaming_client.ep_client, [sensor.resource_id], server=server, dataset_names=[sensor.name],
                 )
+                stream = streaming_client.create_stream(resources=selectors, filters=[], server=server)
                 streams.append(ActiveStream(
                     sensor_id=sensor.sensor_id,
-                    stream_id=str(getattr(stream, "data_stream_id", "")),
-                    topic=str(getattr(stream, "data_stream_id", "")),
+                    stream_id=str(stream.topic),
+                    topic=str(stream.topic),
                     ingestion_mode=sensor.ingestion_mode,
                     metadata={"resource_id": sensor.resource_id},
                 ))
