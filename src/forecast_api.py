@@ -35,10 +35,6 @@ from scidx_streaming import StreamingClient
 import logging
 
 from src.air_quality_workflow_service import AirQualityWorkflowService
-from src.agent_tools import ToolDispatchError, invoke_tool
-from src.exact_engine import ExactEngine
-from src.phase2_station_log import normalize_live_capture_payloads
-from src.saved_results import SavedResultsStore
 
 app = FastAPI(title="Forecast Service", version="1.0")
 
@@ -1453,17 +1449,6 @@ async def _consume_topic_worker(
                                     state["recent_messages"] = state["recent_messages"][-recent_limit:]
                                 batch_messages.append(msg)
                                 added += 1
-                    if batch_messages:
-                        processing_order_start = int(state.get("exact_processing_order", 0))
-                        normalized_rows = normalize_live_capture_payloads(
-                            batch_messages,
-                            topic=topic,
-                            processing_order_start=processing_order_start,
-                        )
-                        if normalized_rows:
-                            ingest_result = EXACT_ENGINE.ingest_rows(normalized_rows)
-                            state["exact_processing_order"] = processing_order_start + len(normalized_rows)
-                            state["exact_rows_ingested"] = int(state.get("exact_rows_ingested", 0)) + ingest_result["accepted"]
                     message_count += added if added > 0 else (current_rows - seen_rows)
                     state["message_count"] = message_count
                     seen_rows = current_rows
@@ -2026,8 +2011,6 @@ WORKFLOW_SERVICE = AirQualityWorkflowService(
     create_clients=_create_clients,
     logger=logger,
 )
-SAVED_RESULTS_STORE = SavedResultsStore(project_root=PROJECT_ROOT)
-EXACT_ENGINE = ExactEngine(enable_sketches=True)
 
 
 @app.get("/sensors")
@@ -2329,35 +2312,17 @@ def run_prediction_job(req_payload: Dict[str, Any]) -> Dict[str, Any]:
     job = get_current_job(connection=AURORA_QUEUE.connection)
     request_key = None
     preexisting_files: set[str] = set()
-    saved_run_record: Optional[Dict[str, Any]] = None
 
     try:
         request_key = str((job.meta or {}).get("request_key") or "") if job else None
         _set_job_meta(job, step="init")
-        saved_run_record = SAVED_RESULTS_STORE.start_run(
-            region=req.region.dict(),
-            requested_dates=req.dates.dict(),
-            fixed_aurora_config=dict(FIXED_AURORA_CONFIG),
-            overwrite=req.overwrite,
-            trigger_mode="rq" if job is not None else "direct",
-        )
-        _set_job_meta(job, saved_run_id=saved_run_record["run_id"])
 
         if not req.overwrite:
             existing = _find_matching_prediction_dataset(req)
             if existing:
-                saved_run_record["result_source"] = "catalog_reuse"
-                final_record = SAVED_RESULTS_STORE.finish_run(
-                    saved_run_record,
-                    status="success",
-                    result=existing["result"],
-                    error_summary=None,
-                )
                 _set_job_meta(job, step="complete", result_source="catalog_reuse")
                 return {
                     **existing["result"],
-                    "saved_run_id": final_record["run_id"],
-                    "daily_summary_path": final_record.get("daily_summary_path"),
                     "result_source": "catalog_reuse",
                     "reused_prediction_dataset": existing.get("dataset_name"),
                 }
@@ -2387,29 +2352,13 @@ def run_prediction_job(req_payload: Dict[str, Any]) -> Dict[str, Any]:
             on_progress=_progress,
         )
 
-        final_record = SAVED_RESULTS_STORE.finish_run(
-            saved_run_record,
-            status="success",
-            result=result,
-            error_summary=None,
-        )
-
         _set_job_meta(job, step="complete", result_source="generated")
         return {
             **result,
-            "saved_run_id": final_record["run_id"],
-            "daily_summary_path": final_record.get("daily_summary_path"),
             "result_source": "generated",
         }
 
     except Exception as ex:
-        if saved_run_record is not None:
-            SAVED_RESULTS_STORE.finish_run(
-                saved_run_record,
-                status="failed",
-                result=None,
-                error_summary=str(ex),
-            )
         _set_job_meta(job, step="failed", error=str(ex), traceback=traceback.format_exc())
         raise
     finally:
@@ -2442,78 +2391,6 @@ def run_prediction_job(req_payload: Dict[str, Any]) -> Dict[str, Any]:
 @app.get("/health")
 def health():
     return {"ok": True}
-
-
-@app.get("/exact/hourly")
-def get_exact_hourly(
-    hour_bucket: Optional[str] = Query(default=None),
-    stid: Optional[str] = Query(default=None),
-    sensor: Optional[str] = Query(default=None),
-):
-    items = EXACT_ENGINE.get_hourly(hour_bucket=hour_bucket, stid=stid, sensor=sensor)
-    return {"count": len(items), "items": items}
-
-
-@app.get("/exact/daily")
-def get_exact_daily(
-    day_bucket: Optional[str] = Query(default=None),
-    stid: Optional[str] = Query(default=None),
-    sensor: Optional[str] = Query(default=None),
-):
-    items = EXACT_ENGINE.get_daily(day_bucket=day_bucket, stid=stid, sensor=sensor)
-    return {"count": len(items), "items": items}
-
-
-@app.get("/exact/latest")
-def get_exact_latest(
-    stid: Optional[str] = Query(default=None),
-    sensor: Optional[str] = Query(default=None),
-):
-    items = EXACT_ENGINE.get_latest(stid=stid, sensor=sensor)
-    return {"count": len(items), "items": items}
-
-
-@app.get("/exact/stream-health")
-def get_exact_stream_health():
-    return EXACT_ENGINE.get_stream_health()
-
-
-@app.get("/exact/hourly-quantiles")
-def get_exact_hourly_quantiles(
-    hour_bucket: Optional[str] = Query(default=None),
-    stid: Optional[str] = Query(default=None),
-    sensor: Optional[str] = Query(default=None),
-):
-    items = EXACT_ENGINE.get_hourly_quantiles(hour_bucket=hour_bucket, stid=stid, sensor=sensor)
-    return {"count": len(items), "items": items}
-
-
-@app.get("/exact/daily-quantiles")
-def get_exact_daily_quantiles(
-    day_bucket: Optional[str] = Query(default=None),
-    stid: Optional[str] = Query(default=None),
-    sensor: Optional[str] = Query(default=None),
-):
-    items = EXACT_ENGINE.get_daily_quantiles(day_bucket=day_bucket, stid=stid, sensor=sensor)
-    return {"count": len(items), "items": items}
-
-
-@app.post("/exact/reset")
-def reset_exact_engine():
-    return EXACT_ENGINE.reset()
-
-
-@app.post("/tools/invoke")
-def invoke_agent_tool(request: ToolInvocationRequest):
-    try:
-        return invoke_tool(
-            request.tool,
-            request.arguments,
-            exact_engine=EXACT_ENGINE,
-            saved_results_store=SAVED_RESULTS_STORE,
-        )
-    except ToolDispatchError as ex:
-        raise HTTPException(status_code=400, detail=str(ex)) from ex
 
 
 @app.post("/run-model")
@@ -2612,37 +2489,6 @@ def status(job_id: str):
         raise HTTPException(status_code=503, detail=f"Queue backend unavailable: {ex}") from ex
 
     return _status_payload_from_rq_job(job)
-
-
-@app.get("/saved-results/runs")
-def list_saved_runs(
-    limit: int = Query(default=20, ge=1, le=100),
-    region: Optional[str] = Query(default=None),
-    status: Optional[Literal["running", "success", "failed"]] = Query(default=None),
-):
-    return {
-        "runs": SAVED_RESULTS_STORE.list_runs(
-            limit=limit,
-            region=region,
-            status=status,
-        )
-    }
-
-
-@app.get("/saved-results/runs/{run_id}")
-def saved_run_status(run_id: str):
-    record = SAVED_RESULTS_STORE.get_run(run_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="saved run not found")
-    return record
-
-
-@app.get("/saved-results/daily-summary/latest")
-def latest_daily_summary(region: Optional[str] = Query(default=None)):
-    summary = SAVED_RESULTS_STORE.get_latest_summary(region=region)
-    if summary is None:
-        raise HTTPException(status_code=404, detail="daily summary not found")
-    return summary
 
 
 @app.get("/predictions")
