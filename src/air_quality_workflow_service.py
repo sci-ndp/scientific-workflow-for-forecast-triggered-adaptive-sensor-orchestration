@@ -377,6 +377,10 @@ class AirQualityWorkflowService:
         map_df.to_csv(map_out, index=False)
         preview_df = map_df.head(10).astype(object)
         preview_df = preview_df.where(pd.notna(preview_df), None)
+        # Preserve every hotspot-to-station assignment for the UI handoff,
+        # including repeated stations and rows beyond the ten-row preview.
+        selected_df = map_df.astype(object)
+        selected_df = selected_df.where(pd.notna(selected_df), None)
 
         return {
             "hotspots_file": str(hotspot_path),
@@ -384,5 +388,6 @@ class AirQualityWorkflowService:
             "map_csv": str(map_out),
             "map_url": self.build_public_map_url(map_out.name),
             "mapping_count": int(len(map_df)),
+            "selected_sensors": selected_df.to_dict(orient="records"),
             "preview": preview_df.to_dict(orient="records"),
         }
