@@ -818,7 +818,7 @@ async function selectSensors(){
     log('sensor-log','Response (meta):\\n'+JSON.stringify({mapping_count:j.mapping_count,map_csv:j.map_csv,map_url:j.map_url},null,2));
     if(_selectedSensors.length){
       $('sensor-preview').replaceChildren(makeActionTable(
-        _selectedSensors,Object.keys(_selectedSensors[0]),'Use for Consumption Methods',
+        _selectedSensors,Object.keys(_selectedSensors[0]),'Consumption Methods',
         (_row,index)=>useSensorForCM(index)));
     }
     markStepDone(5);
