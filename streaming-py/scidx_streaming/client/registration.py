@@ -270,22 +270,12 @@ class StreamingDataSourceRegistration:
             # For Kafka or other non-URL methods, construct a placeholder URL if possible
             method_type = method.get("type", "").lower()
             if method_type == "kafka":
-                host = config.get("host", "")
-                port = config.get("port", "")
-                topic = config.get("topic", "")
-                if host or port:
-                    # Construct kafka://host:port/topic
-                    addr = host
-                    if port:
-                        addr += f":{port}"
-                    resource["url"] = f"kafka://{addr}/{topic}" if topic else f"kafka://{addr}"
-                elif topic:
-                    resource["url"] = f"kafka://{topic}"
-                else:
-                    resource["url"] = "kafka://"
+                resource["url"] = "/kafka/" + "/".join(
+                    quote(str(config.get(key) or ""), safe="")
+                    for key in ("host", "port", "topic")
+                )
             else:
-                # Generic placeholder URL for other types without a direct URL
-                resource["url"] = f"{method_type}://"
+                resource["url"] = f"{method_type}://"        
         return resource
 
     def _get_dataset(self, dataset_name: str, server: str = "local") -> Optional[Dict[str, Any]]:
