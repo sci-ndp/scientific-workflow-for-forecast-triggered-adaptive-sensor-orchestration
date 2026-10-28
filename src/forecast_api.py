@@ -366,27 +366,10 @@ _DASHBOARD_HTML = """\
 <!-- STEP 6 — Sensors -->
 <div class="card" id="step-6">
   <h2>7 &middot; Sensors</h2>
-  <p style="font-size:.84rem;color:var(--muted);margin-bottom:14px">Discover registered sensors and look up their consumption methods for streaming.</p>
-  <div class="form-grid">
-    <div class="form-group"><label>Server override (optional)</label><input id="sen-server" placeholder="leave blank for default"/></div>
-  </div>
-  <div class="actions">
-    <button class="btn btn-primary btn-sm" id="btn-sensors" onclick="loadSensorList()">Load Sensors</button>
-    <span id="sensors-status"></span>
-  </div>
-  <div class="preview-table-wrap" id="sensors-table" style="margin-top:10px"></div>
-
+  <p id="cm-selected-sensor" style="color:var(--muted)">Choose a sensor row in Select Sensors.</p>
   <h3 style="margin-top:20px;font-size:1rem;color:var(--accent-dark)">Consumption Methods</h3>
-  <div class="form-grid" style="margin-top:8px">
-    <div class="form-group full"><label>Sensor name</label>
-      <input id="cm-sensor-name" placeholder="e.g. synoptic_sensor_qsvn_utah_pm2_5"/></div>
-  </div>
-  <div class="actions">
-    <button class="btn btn-pink btn-sm" id="btn-cm" onclick="lookupConsumptionMethod()">Lookup Methods</button>
-    <span id="cm-status"></span>
-  </div>
+  <div id="cm-status"></div>
   <div class="preview-table-wrap" id="cm-table" style="margin-top:10px"></div>
-  <div class="log hidden" id="cm-log"></div>
   <div class="nav-btns">
     <button class="btn btn-outline btn-sm" onclick="goStep(5)">&larr; Back</button>
     <button class="btn btn-outline btn-sm" onclick="goStep(7)">Next &rarr;</button>
@@ -782,69 +765,90 @@ async function loadHotspotFiles(){
 function useHotspot(url){_lastHotUrl=url;$('ss-file').value=url;goStep(5)}
 
 /* ── Step 5: Select Sensors ──────────────────── */
+let _selectedSensors = [];
+let _cmRequest = 0;
+function makeActionTable(rows,cols,label,onUse){
+  const table=document.createElement('table');
+  const thead=document.createElement('thead');
+  const header=document.createElement('tr');
+  [...cols,'action'].forEach(name=>{
+    const cell=document.createElement('th');cell.textContent=name;header.appendChild(cell);
+  });
+  thead.appendChild(header);table.appendChild(thead);
+  const tbody=document.createElement('tbody');
+  rows.forEach((row,index)=>{
+    const tr=document.createElement('tr');
+    const action=document.createElement('td');
+    const button=document.createElement('button');
+    button.type='button';button.className='btn btn-outline btn-sm';button.textContent=label;
+    button.addEventListener('click',()=>onUse(row,index));
+    action.appendChild(button);
+    cols.forEach(name=>{
+      const cell=document.createElement('td');
+      cell.textContent=row[name]!=null?String(row[name]):'';tr.appendChild(cell);
+    });
+    tr.appendChild(action);tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);return table;
+}
+function clearConsumptionMethods(){
+  _cmRequest++;
+  $('cm-status').textContent='';
+  $('cm-table').replaceChildren();
+}
+function resetSelectedSensors(){
+  _selectedSensors=[];
+  $('sensor-preview').replaceChildren();
+  $('cm-selected-sensor').textContent='Choose a sensor row in Select Sensors.';
+  clearConsumptionMethods();
+}
 async function selectSensors(){
   const btn=$('btn-sensor');btn.disabled=true;clearLog('sensor-log');
+  resetSelectedSensors();
   $('sensor-status').innerHTML='<span class="spinner"></span> Selecting&hellip;';
   const payload={hotspots_file:$('ss-file').value,selection_mode:$('ss-mode').value,
     k:+$('ss-k').value,radius_km:+$('ss-radius').value};
   log('sensor-log','POST /select-sensor\\n'+JSON.stringify(payload,null,2));
   try{
     const j=await api('POST','/select-sensor',payload);
-    $('sensor-status').innerHTML=badge('ok')+' '+j.sensors_found+' sensors, '+j.mapping_count+' mappings';
-    log('sensor-log','Response (meta):\\n'+JSON.stringify({sensors_found:j.sensors_found,mapping_count:j.mapping_count,map_csv:j.map_csv,map_url:j.map_url},null,2));
-    if(j.preview&&j.preview.length)$('sensor-preview').innerHTML=makeTable(j.preview);
+    _selectedSensors=j.selected_sensors||[];
+    $('sensor-status').innerHTML=badge('ok')+' '+j.mapping_count+' hotspot-to-station mappings';
+    log('sensor-log','Response (meta):\\n'+JSON.stringify({mapping_count:j.mapping_count,map_csv:j.map_csv,map_url:j.map_url},null,2));
+    if(_selectedSensors.length){
+      $('sensor-preview').replaceChildren(makeActionTable(
+        _selectedSensors,Object.keys(_selectedSensors[0]),'Consumption Methods',
+        (_row,index)=>useSensorForCM(index)));
+    }
     markStepDone(5);
   }catch(e){$('sensor-status').innerHTML=badge('failed')+' '+e.detail;log('sensor-log','ERROR: '+JSON.stringify(e))}
   btn.disabled=false;
 }
 
 /* ── Step 6: Sensors ─────────────────────────── */
-let _sensorItems = [];
-async function loadSensorList(){
-  const btn=$('btn-sensors');btn.disabled=true;
-  $('sensors-status').innerHTML='<span class="spinner"></span> Loading&hellip;';
-  const server=$('sen-server').value.trim();
-  const qs=server?'?server='+encodeURIComponent(server):'';
-  try{
-    const j=await api('GET','/sensors'+qs);
-    _sensorItems=j.items||[];
-    $('sensors-status').innerHTML=badge('ok')+' '+j.count+' sensors';
-    if(_sensorItems.length){
-      $('sensors-table').innerHTML=makeTable(_sensorItems.map(s=>({
-        name:s.dataset_name||'',station_id:s.station_id||'',station_name:s.station_name||'',
-        region:s.region||'',resources:s.resources_count,
-        action:'<button class=\\"btn btn-outline btn-sm\\" onclick=\\"useSensorForCM(\\''+
-               (s.dataset_name||'')+'\\')\\">Lookup CM</button>'
-      })),['name','station_id','station_name','region','resources','action']);
-    }else{$('sensors-table').innerHTML='<p style="color:var(--muted)">No sensors found.</p>'}
-    markStepDone(6);
-  }catch(e){$('sensors-status').innerHTML=badge('failed')+' '+(e.detail||e);$('sensors-table').innerHTML=''}
-  btn.disabled=false;
+function useSensorForCM(index){
+  const sensor=_selectedSensors[index];
+  if(!sensor||!sensor.sensor_name)return;
+  clearConsumptionMethods();
+  $('cm-selected-sensor').textContent=sensor.sensor_name;
+  goStep(6);
+  return lookupConsumptionMethod(sensor.sensor_name);
 }
 
-function useSensorForCM(name){$('cm-sensor-name').value=name;lookupConsumptionMethod()}
-
-async function lookupConsumptionMethod(){
-  const name=$('cm-sensor-name').value.trim();
-  if(!name){$('cm-status').innerHTML='<span style="color:var(--danger)">Enter a sensor name</span>';return}
-  const btn=$('btn-cm');btn.disabled=true;clearLog('cm-log');
+async function lookupConsumptionMethod(name){
+  if(!name)return;
+  const request=++_cmRequest;
   $('cm-status').innerHTML='<span class="spinner"></span> Looking up&hellip;';
-  const server=$('sen-server').value.trim();
-  const qs=server?'?server='+encodeURIComponent(server):'';
   try{
-    const j=await api('GET','/sensors/'+encodeURIComponent(name)+'/consumption-method'+qs);
+    const j=await api('GET','/sensors/'+encodeURIComponent(name)+'/consumption-method');
+    if(request!==_cmRequest)return;
     $('cm-status').innerHTML=badge('ok')+' '+j.count+' methods';
-    log('cm-log','GET /sensors/'+name+'/consumption-method\\n'+JSON.stringify(j,null,2));
+    markStepDone(6);
     const methods=j.consumption_methods||[];
     if(methods.length){
-      $('cm-table').innerHTML=makeTable(methods.map(m=>({
-        id:m.id,name:m.name||'',type:m.type||'',
-        action:'<button class=\\"btn btn-outline btn-sm\\" onclick=\\"useMethodForStream(\\''+
-               (m.id||'')+'\\')\\">Use for Stream</button>'
-      })),['id','name','type','action']);
-    }else{$('cm-table').innerHTML='<p style="color:var(--muted)">No consumption methods found.</p>'}
-  }catch(e){$('cm-status').innerHTML=badge('failed')+' '+(e.detail||e);log('cm-log','ERROR: '+JSON.stringify(e))}
-  btn.disabled=false;
+      $('cm-table').replaceChildren(makeActionTable(
+        methods,['id','name','type'],'Use for Stream',method=>useMethodForStream(method.id)));
+    }else{$('cm-table').textContent='No consumption methods found.'}
+  }catch(e){if(request!==_cmRequest)return;$('cm-status').textContent='Lookup failed: '+(e.detail||e)}
 }
 
 function useMethodForStream(methodId){
