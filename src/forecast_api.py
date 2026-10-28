@@ -814,8 +814,8 @@ async function selectSensors(){
     const j=await api('POST','/select-sensor',payload);
     _selectedSensors=j.selected_sensors||[];
     $('btn-use-sensors').disabled=!_selectedSensors.length;
-    $('sensor-status').innerHTML=badge('ok')+' '+j.sensors_found+' candidates searched, '+j.mapping_count+' hotspot-to-station mappings';
-    log('sensor-log','Response (meta):\\n'+JSON.stringify({sensors_found:j.sensors_found,mapping_count:j.mapping_count,map_csv:j.map_csv,map_url:j.map_url},null,2));
+    $('sensor-status').innerHTML=badge('ok')+' '+j.mapping_count+' hotspot-to-station mappings';
+    log('sensor-log','Response (meta):\\n'+JSON.stringify({mapping_count:j.mapping_count,map_csv:j.map_csv,map_url:j.map_url},null,2));
     if(j.preview&&j.preview.length)$('sensor-preview').innerHTML=makeTable(j.preview);
     markStepDone(5);
   }catch(e){$('sensor-status').innerHTML=badge('failed')+' '+e.detail;log('sensor-log','ERROR: '+JSON.stringify(e))}
