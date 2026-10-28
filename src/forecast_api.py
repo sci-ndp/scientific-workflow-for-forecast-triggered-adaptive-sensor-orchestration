@@ -366,7 +366,16 @@ _DASHBOARD_HTML = """\
 <!-- STEP 6 — Sensors -->
 <div class="card" id="step-6">
   <h2>7 &middot; Sensors</h2>
-  <p id="cm-selected-sensor" style="color:var(--muted)">Choose a sensor row in Select Sensors.</p>
+  <form onsubmit="lookupConsumptionMethod();return false">
+    <div class="form-grid">
+      <div class="form-group full"><label>Sensor dataset name</label>
+        <input id="cm-sensor-name" placeholder="e.g. synoptic_push_quttc_s2365_aq" oninput="clearConsumptionMethods()"/></div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary btn-sm" type="submit">Consumption Methods</button>
+    </div>
+  </form>
+  <p id="cm-selected-sensor" style="color:var(--muted)">Choose a sensor row in Select Sensors or enter a sensor dataset name above.</p>
   <h3 style="margin-top:20px;font-size:1rem;color:var(--accent-dark)">Consumption Methods</h3>
   <div id="cm-status"></div>
   <div class="preview-table-wrap" id="cm-table" style="margin-top:10px"></div>
@@ -795,11 +804,12 @@ function clearConsumptionMethods(){
   _cmRequest++;
   $('cm-status').textContent='';
   $('cm-table').replaceChildren();
+  $('cm-selected-sensor').textContent='';
 }
 function resetSelectedSensors(){
   _selectedSensors=[];
   $('sensor-preview').replaceChildren();
-  $('cm-selected-sensor').textContent='Choose a sensor row in Select Sensors.';
+  $('cm-sensor-name').value='';
   clearConsumptionMethods();
 }
 async function selectSensors(){
@@ -828,14 +838,17 @@ async function selectSensors(){
 function useSensorForCM(index){
   const sensor=_selectedSensors[index];
   if(!sensor||!sensor.sensor_name)return;
-  clearConsumptionMethods();
-  $('cm-selected-sensor').textContent=sensor.sensor_name;
+  $('cm-sensor-name').value=sensor.sensor_name;
   goStep(6);
   return lookupConsumptionMethod(sensor.sensor_name);
 }
 
 async function lookupConsumptionMethod(name){
-  if(!name)return;
+  name=String(name||$('cm-sensor-name').value).trim();
+  clearConsumptionMethods();
+  if(!name){$('cm-status').textContent='Enter a sensor dataset name.';return}
+  $('cm-sensor-name').value=name;
+  $('cm-selected-sensor').textContent=name;
   const request=++_cmRequest;
   $('cm-status').innerHTML='<span class="spinner"></span> Looking up&hellip;';
   try{
