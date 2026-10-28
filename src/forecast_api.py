@@ -773,7 +773,7 @@ function makeActionTable(rows,cols,label,onUse){
   const table=document.createElement('table');
   const thead=document.createElement('thead');
   const header=document.createElement('tr');
-  ['action',...cols].forEach(name=>{
+  [...cols,'action'].forEach(name=>{
     const cell=document.createElement('th');cell.textContent=name;header.appendChild(cell);
   });
   thead.appendChild(header);table.appendChild(thead);
@@ -784,12 +784,12 @@ function makeActionTable(rows,cols,label,onUse){
     const button=document.createElement('button');
     button.type='button';button.className='btn btn-outline btn-sm';button.textContent=label;
     button.addEventListener('click',()=>onUse(row,index));
-    action.appendChild(button);tr.appendChild(action);
+    action.appendChild(button);
     cols.forEach(name=>{
       const cell=document.createElement('td');
       cell.textContent=row[name]!=null?String(row[name]):'';tr.appendChild(cell);
     });
-    tbody.appendChild(tr);
+    tr.appendChild(action);tbody.appendChild(tr);
   });
   table.appendChild(tbody);return table;
 }
