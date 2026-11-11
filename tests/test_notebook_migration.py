@@ -68,13 +68,23 @@ def test_notebook_v2_cells_execute_through_consumption(monkeypatch, streaming, c
     assert "messages_read: 5" in capsys.readouterr().out
 
 
-def test_notebook_websocket_limitation_is_explicit_and_clears_stale_topic():
+def test_notebook_websocket_source_creates_a_stream():
     resource = ResourceRecord(id="ws-source", dataset_id="sensor", dataset_name="sensor",
                               type="websocket", name="feed", description="WebSocket", state="active", metadata={}, raw={})
-    namespace = {"selected_resource": resource, "topic": "stale-topic"}
-    with pytest.raises(NotImplementedError, match="does not ingest WebSocket"):
-        run_cells([39], namespace)
-    assert namespace["topic"] is None
+    class Streaming:
+        async def acreate_stream(self, **kwargs):
+            assert kwargs == {"resources": [("sensor", "feed")], "filters": [], "server": "local"}
+            return SimpleNamespace(topic="websocket-topic")
+
+    namespace = {
+        "selected_resource": resource,
+        "resource_selector": ("sensor", "feed"),
+        "streaming": Streaming(),
+        "SERVER": "local",
+        "topic": "stale-topic",
+    }
+    run_cells([39], namespace)
+    assert namespace["topic"] == "websocket-topic"
 
 
 def test_prediction_url_loads_fresh_data_without_catalog_lookup(monkeypatch):
